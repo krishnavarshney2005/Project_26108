@@ -216,12 +216,20 @@ class HybridRetrievalService:
             # Fused score
             final_score = (self.lexical_weight * norm_lex) + (self.vector_weight * norm_vec)
 
+            # Minimum similarity threshold to drop noise (e.g., out-of-domain queries 
+            # dragging in the "least bad" candidates). Genuine matches typically score > 0.70.
+            logger.info(f"Hybrid retrieval candidate: {std_obj.is_number} with final_score={final_score}, norm_vec={norm_vec}")
+            if final_score < 0.45:
+                continue
+
             matched_terms = lex_candidate.matched_terms if lex_candidate else []
             ev_list = lex_candidate.evidence if lex_candidate else []
 
             # Populate relevance_score on Standard copy
             std_copy = std_obj.model_copy()
             std_copy.relevance_score = round(final_score, 4)
+            std_copy.semantic_score = round(norm_vec, 4)
+
 
             candidate = CandidateStandard(
                 standard=std_copy,

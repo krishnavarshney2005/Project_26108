@@ -115,7 +115,8 @@ Respond ONLY with a valid JSON object:
   "verdict": "one of the options above",
   "reason": "concise explanation referencing specific standard numbers",
   "action": "concrete recommended action for the procurement officer",
-  "confidence": 0.85
+  "confidence": 0.85,
+  "matched_is_number": "IS 1234 (or null if none applies)"
 }}"""
 
         try:

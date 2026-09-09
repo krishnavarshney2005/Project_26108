@@ -57,6 +57,9 @@ export interface Standard {
   evidenceAvailable?: boolean;
   reviewConfidence?: HumanReviewConfidence;
   humanDecision?: HumanDecision;
+  bisSourceUrl?: string;
+  retrievedAt?: string;
+  fieldAvailability?: Record<string, string>;
 }
 
 

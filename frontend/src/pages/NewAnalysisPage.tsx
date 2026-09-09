@@ -27,7 +27,7 @@ import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { useRouter } from '@/router';
-import { createAnalysis, waitForAnalysis, getSampleDocument } from '@/services/api';
+import { createAnalysis, waitForAnalysis, getSampleDocument, extractProfilePreview } from '@/services/api';
 import { statusBadge } from '@/services/adapter';
 import type { ProcurementProfile, ProfileParameter, ProfileFieldStatus } from '@/data/types';
 
@@ -182,6 +182,19 @@ const TAMIL_PROFILE: ProcurementProfile = {
   ]
 };
 
+// Generic blank profile used when a real (non-fixture) input is submitted.
+// All fields are empty/editable — the user fills or confirms before analysing.
+const GENERIC_PROFILE: ProcurementProfile = {
+  product: '',
+  category: '',
+  application: '',
+  environment: '',
+  technicalParameters: [],
+  performanceRequirements: [],
+  testingRequirements: [],
+  regulatoryMentions: [],
+};
+
 const INITIAL_PROFILE: ProcurementProfile = {
   product: 'Commercial LED Street Lighting Luminaire',
   category: 'Outdoor Lighting & Electrical Infrastructure',
@@ -231,6 +244,9 @@ export function NewAnalysisPage() {
 
   // Profile data
   const [profile, setProfile] = useState<ProcurementProfile>(INITIAL_PROFILE);
+  // Tracks which presentation fixture was EXPLICITLY loaded via the sample button.
+  // null means the user is submitting real input — never inferred from keywords.
+  const [demoFixture, setDemoFixture] = useState<'led' | 'tamil' | 'hindi' | null>(null);
   const [addingSection, setAddingSection] = useState<string | null>(null);
   const [newFieldLabel, setNewFieldLabel] = useState('');
   const [newFieldValue, setNewFieldValue] = useState('');
@@ -263,6 +279,7 @@ export function NewAnalysisPage() {
   // Load sample data helper — fetches the real bundled tender PDF for upload mode
   const handleLoadSample = async () => {
     setAnalysisTitle('Municipal LED Street Lighting — Arterial Roads NIT #MCD-2024-LT-09');
+    setDemoFixture('led');
     if (inputMode === 'upload') {
       try {
         const file = await getSampleDocument();
@@ -299,29 +316,6 @@ export function NewAnalysisPage() {
         text = SAMPLE_PASTED_SPEC;
       }
 
-      // --- PRESENTATION MODE INTERCEPT ---
-      const filename = file?.name?.toLowerCase() || '';
-      const contentStr = text?.toLowerCase() || '';
-      const titleStr = analysisTitle?.toLowerCase() || '';
-      
-      let demoTarget = '';
-      if (filename.includes('led') || contentStr.includes('arterial roads') || contentStr.includes('luminaire')) {
-         demoTarget = 'an-001';
-      } else if (filename.includes('tamil') || filename.includes('தமிழ்') || titleStr.includes('tamil') || titleStr.includes('தமிழ்')) {
-         demoTarget = 'an-tamil';
-      } else if (filename.includes('hindi') || filename.includes('nibmg') || contentStr.includes('168 nos') || contentStr.includes('bric-nibmg') || contentStr.includes('bric-national institute') || titleStr.includes('hindi') || titleStr.includes('nibmg')) {
-         demoTarget = 'an-hindi';
-      }
-
-      if (demoTarget) {
-         setSubmitStatusLabel('Extracting text...');
-         await new Promise(r => setTimeout(r, 4000));
-         setSubmitStatusLabel('Analyzing against BIS catalog...');
-         await new Promise(r => setTimeout(r, 5500));
-         navigate({ name: 'analysis', analysisId: demoTarget, tab: 'overview' });
-         return;
-      }
-      // --- END PRESENTATION MODE INTERCEPT ---
 
       const created = await createAnalysis({
         text,
@@ -352,35 +346,62 @@ export function NewAnalysisPage() {
   };
 
   // Trigger profile extraction
-  const handleStartExtraction = () => {
+  const handleStartExtraction = async () => {
     setStep('extracting');
     setExtractionProgress(1);
+    setSubmitError(null);
 
-    const filename = uploadedFileObjects[0]?.name?.toLowerCase() || '';
-    const contentStr = (pastedSpec + ' ' + describedText).toLowerCase();
-    const titleStr = analysisTitle?.toLowerCase() || '';
-    
-    if (filename.includes('tamil') || filename.includes('தமிழ்') || titleStr.includes('tamil') || titleStr.includes('தமிழ்')) {
-      setProfile(TAMIL_PROFILE as ProcurementProfile);
-    } else if (filename.includes('hindi') || filename.includes('nibmg') || contentStr.includes('168 nos') || contentStr.includes('bric-nibmg') || contentStr.includes('bric-national institute') || titleStr.includes('hindi') || titleStr.includes('nibmg')) {
-      setProfile(HINDI_PROFILE as ProcurementProfile);
-    } else {
-      setProfile(INITIAL_PROFILE);
+    // The Tamil and Hindi fixtures are presentation-only: they showcase the
+    // multilingual UI, and the deterministic extractor reads English clause
+    // structure, so there is nothing real for it to return on them. The bundled
+    // LED tender is deliberately NOT in here — it is the demo everyone watches,
+    // it is real English tender text, and it must go down the same live path as
+    // any uploaded document. It used to short-circuit to a hardcoded profile
+    // behind 8.5 s of fake progress, which is precisely why the app looked like
+    // it was not using its own backend.
+    if (demoFixture === 'tamil' || demoFixture === 'hindi') {
+      setProfile((demoFixture === 'tamil' ? TAMIL_PROFILE : HINDI_PROFILE) as ProcurementProfile);
+      setTimeout(() => setExtractionProgress(2), 700);
+      setTimeout(() => setExtractionProgress(3), 1400);
+      setTimeout(() => setExtractionProgress(4), 2000);
+      setTimeout(() => setStep('profile'), 2400);
+      return;
     }
 
-    const timer1 = setTimeout(() => setExtractionProgress(2), 2000);
-    const timer2 = setTimeout(() => setExtractionProgress(3), 4500);
-    const timer3 = setTimeout(() => setExtractionProgress(4), 6500);
-    const timer4 = setTimeout(() => {
-      setStep('profile');
-    }, 8500);
+    // Live extraction path — every real input, including the bundled sample.
+    try {
+      let text = '';
+      let file: File | undefined = undefined;
 
-    return () => {
-      clearTimeout(timer1);
-      clearTimeout(timer2);
-      clearTimeout(timer3);
-      clearTimeout(timer4);
-    };
+      if (inputMode === 'upload' && uploadedFileObjects[0]) {
+        file = uploadedFileObjects[0];
+      } else if (inputMode === 'paste' && pastedSpec.trim()) {
+        text = pastedSpec.trim();
+      } else if (inputMode === 'describe' && describedText.trim()) {
+        text = describedText.trim();
+      } else if (demoFixture === 'led') {
+        // Sample chosen but the PDF fetch failed (backend cold). Send the sample
+        // spec text so the profile is still extracted from real text rather than
+        // substituted with a canned one.
+        text = SAMPLE_PASTED_SPEC;
+      } else {
+        setSubmitError('Add a document, paste a specification, or describe the requirement first.');
+        setStep('input');
+        return;
+      }
+
+      // Animate steps concurrently with the API call
+      setTimeout(() => setExtractionProgress(2), 1000);
+      setTimeout(() => setExtractionProgress(3), 2500);
+
+      const res = await extractProfilePreview({ text, file, category: profile.category });
+      setProfile(res);
+      setExtractionProgress(4);
+      setTimeout(() => setStep('profile'), 500);
+    } catch (err) {
+      setSubmitError(err instanceof Error ? err.message : 'Could not extract profile. Please try again.');
+      setStep('input');
+    }
   };
 
   // Profile field handlers
@@ -685,7 +706,7 @@ export function NewAnalysisPage() {
                   <textarea
                     rows={10}
                     value={pastedSpec}
-                    onChange={(e) => setPastedSpec(e.target.value)}
+                    onChange={(e) => { setPastedSpec(e.target.value); setDemoFixture(null); }}
                     placeholder="Paste tender specifications, BOQ clauses, scope of work, and performance requirements here…"
                     className="input font-mono text-xs leading-relaxed"
                   />
@@ -713,7 +734,7 @@ export function NewAnalysisPage() {
                   <textarea
                     rows={6}
                     value={describedText}
-                    onChange={(e) => setDescribedText(e.target.value)}
+                    onChange={(e) => { setDescribedText(e.target.value); setDemoFixture(null); }}
                     placeholder="Describe what product or work you are procuring, intended operating environment, key ratings, and any specific standards or certifications you require…"
                     className="input text-xs leading-relaxed"
                   />
@@ -727,7 +748,9 @@ export function NewAnalysisPage() {
             {/* Bottom Action Bar */}
             <div className="flex items-center justify-between border-t border-ink-200 bg-white rounded-lg p-4 shadow-soft">
               <div className="text-xs text-ink-500">
-                {isInputValid ? (
+                {submitError ? (
+                  <span className="text-error-600 font-medium">{submitError}</span>
+                ) : isInputValid ? (
                   <span className="text-success-700 font-medium flex items-center gap-1.5">
                     <CheckCircle2 size={13} />
                     Input ready for profile extraction

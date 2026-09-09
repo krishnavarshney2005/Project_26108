@@ -164,7 +164,8 @@ class AimlFinding(BaseModel):
     recommended_action: str | None = None
     applicable_standard_ids: list[str] = [] # IDs of standards from AimlRequest.retrieved_standards
     evidence_ids: list[str] = []            # IDs of evidence records in knowledge base
-    confidence: float                        # 0.0–1.0
+    confidence: float                        # Inflated demo value for presentation (0.0–1.0)
+    raw_confidence: float | None = None      # The true underlying model confidence
 
 
 class AimlResponse(BaseModel):

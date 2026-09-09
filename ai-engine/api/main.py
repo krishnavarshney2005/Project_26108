@@ -13,6 +13,17 @@ Endpoints:
 import logging
 import os
 
+# ---------------------------------------------------------------------------
+# OpenMP safety — MUST run before faiss / torch / lightgbm are imported
+# (i.e. before `from src.recommender import Recommender` below). Those wheels
+# each bundle their own copy of libomp; initialising a second OpenMP runtime
+# in a single process aborts with SIGSEGV on macOS. This flag lets them
+# coexist. Pinning to one thread also trims memory + thread oversubscription
+# on the 512 MB Render box. setdefault() so an explicit env var still wins.
+# ---------------------------------------------------------------------------
+os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -93,6 +104,9 @@ class Requirement(BaseModel):
     category: str = "other"
     is_reference: Optional[str] = None
     cited_year: Optional[int] = None
+    relevance_score: Optional[float] = None
+    semantic_score: Optional[float] = None
+
     cited_designation: Optional[str] = None
     location: Optional[str] = None
     page: Optional[int] = None
@@ -107,6 +121,9 @@ class Standard(BaseModel):
     title: str
     status: str
     year: Optional[int] = None
+    relevance_score: Optional[float] = None
+    semantic_score: Optional[float] = None
+
 
 class AimlRequest(BaseModel):
     analysis_id: str

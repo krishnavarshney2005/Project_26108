@@ -20,6 +20,8 @@ pgvector>=0.3.0
 
 # Optional semantic retrieval runtime (the application degrades to lexical
 # retrieval when these or their model assets are unavailable)
+qdrant-client>=1.7.0
+sentence-transformers>=2.7.0
 
 # Document processing
 pdfplumber>=0.11.0           # PDF text extraction (better than PyPDF2 for structured docs)

@@ -97,3 +97,38 @@ code_base.txt
 # Ensure .env everywhere is ignored
 **/.env
 **/.env.local
+
+# -------------------------------------------------------
+# Temporary scripts, dumps, and testing artifacts
+# -------------------------------------------------------
+/*.txt
+/*.json
+/*.joblib
+/*.patch
+/*.sh
+/*.md
+!README.md
+/test_*.py
+/patch_*.py
+/search_catalog*.py
+/quick_test.py
+/fix_training_data.py
+/export_history.py
+/get_reqs.py
+/parse_*.py
+/smoke_test_*.py
+/confidence.py
+/evidence.py
+/issue_detector.py
+/ranking.py
+/recommender.py
+/requirement_analysis.py
+/bis_live_ingestion_patch_final/
+/tatus
+/*.bak
+**/*.bak
+/patch.py
+backend/test_webhook*.py
+backend/test_http_e2e.py
+backend/dump_demo_output.py
+backend/check_models.py

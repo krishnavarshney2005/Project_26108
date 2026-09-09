@@ -28,7 +28,7 @@ from shared.models import (
     SimulationScenario,
 )
 from shared.utils import get_logger, utcnow
-from kartikey.api.routes.analyses import _analyses  # Shared in-memory store
+from kartikey.api.routes.analyses import repository
 from kartikey.orchestration.knowledge_registry import get_registry
 
 logger = get_logger(__name__)
@@ -53,7 +53,7 @@ async def run_simulation(
     This is highly valuable for procurement officers to justify their decisions
     (e.g., rejecting a supplier's request to relax a requirement because it violates a QCO).
     """
-    analysis = _analyses.get(analysis_id)
+    analysis = await repository.get(analysis_id)
     if not analysis:
         raise HTTPException(status_code=404, detail="Analysis not found")
         

@@ -90,3 +90,7 @@ export function getRealEvidence(id: string): EvidenceChainItem[] | undefined {
 export function getRealRelationships(id: string): StandardRelationship[] | undefined {
   return analysisStore.get(id)?.relationships;
 }
+
+export function listRealAnalyses(): Analysis[] {
+  return Array.from(analysisStore.values()).map((b) => b.analysis);
+}

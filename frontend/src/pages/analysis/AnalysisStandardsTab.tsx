@@ -272,7 +272,7 @@ export function AnalysisStandardsTab({ analysis }: Props) {
                         Applicability score
                       </span>
                       <span className="font-mono text-sm font-bold text-ink-900 tabular-nums">
-                        {standard.applicabilityScore ? `${standard.applicabilityScore}%` : '—'}
+                        {standard.applicabilityScore != null ? `${standard.applicabilityScore}%` : '—'}
                       </span>
                     </div>
 
@@ -372,6 +372,18 @@ export function AnalysisStandardsTab({ analysis }: Props) {
                       <>
                         <span>·</span>
                         <span className="text-ink-700">{standard.amendments.join(', ')}</span>
+                      </>
+                    )}
+                    {standard.retrievedAt && (
+                      <>
+                        <span>·</span>
+                        <span>Verified: {standard.retrievedAt.slice(0, 10)}</span>
+                      </>
+                    )}
+                    {standard.bisSourceUrl && (
+                      <>
+                        <span>·</span>
+                        <a href={standard.bisSourceUrl} target="_blank" rel="noopener noreferrer" className="text-teal-600 hover:underline">BIS source ↗</a>
                       </>
                     )}
                   </div>

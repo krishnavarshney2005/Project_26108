@@ -1,18 +1,36 @@
 export const API_BASE = import.meta.env.VITE_API_BASE_URL || '';
 export const API_ROOT = API_BASE + '/api/v1';
 
+export const API_KEY = import.meta.env.VITE_STANDIQ_API_KEY || 'sk_standiq_dev_26108';
+
 // The backend exposes /health at the root, outside the /api/v1 prefix.
 export async function getBackendHealth() {
-  const response = await fetch(`${API_BASE}/health`);
+  const response = await fetch(`${API_BASE}/health`, {
+    headers: { 'X-API-Key': API_KEY }
+  });
   if (!response.ok) throw new Error(`Health check failed: ${response.status}`);
   return response.json();
 }
 
 async function request(path, options = {}) {
-  const response = await fetch(`${API_ROOT}${path}`, options);
+  const headers = {
+    'X-API-Key': API_KEY,
+    ...(options.headers || {})
+  };
+  
+  const response = await fetch(`${API_ROOT}${path}`, { ...options, headers });
   if (!response.ok) {
-    const body = await response.text();
-    throw new Error(`API ${response.status}: ${body || response.statusText}`);
+    let message = response.statusText;
+    try {
+      const body = await response.json();
+      // FastAPI puts structured errors in detail; pick the most readable field
+      message = body?.detail?.message || body?.message || body?.detail || JSON.stringify(body);
+    } catch {
+      message = await response.text().catch(() => response.statusText);
+    }
+    const err = new Error(message);
+    err.status = response.status;
+    throw err;
   }
   return response.json();
 }
@@ -294,4 +312,20 @@ export async function waitForAnalysis(id, onProgress, timeoutMs = 60000) {
     await new Promise((resolve) => setTimeout(resolve, 500));
   }
   throw new Error('Analysis is taking longer than expected. Check History for its current status.');
+}
+
+export async function extractProfilePreview({ text, file, category }) {
+  if (!API_KEY) throw new Error('Demo environment requires an API Key');
+  
+  let document_id = undefined;
+  if (file) {
+    const document = await uploadDocument(file);
+    document_id = document.document_id;
+  }
+  
+  return request('/analyses/extract-profile', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text, document_id, category }),
+  });
 }

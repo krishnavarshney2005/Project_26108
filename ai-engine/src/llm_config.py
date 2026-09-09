@@ -35,7 +35,7 @@ except Exception:  # pragma: no cover
 # Default is the model that is currently available on the API. Override with
 # the GEMINI_MODEL env var if Google deprecates it (verify with
 # `client.models.list()` before changing the default).
-GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
+GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-flash-lite-latest")
 
 # Env var names checked in priority order. GOOGLE_API_KEY is the primary name
 # (shared with the backend); the rest are accepted for backwards compatibility.

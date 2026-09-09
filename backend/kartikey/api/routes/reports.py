@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
 
-from kartikey.api.routes.analyses import _analyses
+from kartikey.api.routes.analyses import repository
 from shared.contracts import AnalysisResponse
 from shared.utils import get_logger
 
@@ -22,39 +22,19 @@ router = APIRouter(prefix="/analyses", tags=["reports"])
 async def get_report(analysis_id: str) -> dict:
     """
     Export a completed analysis as a structured report.
-    
+
     This is a placeholder for Step 9 (Report Generation).
     Eventually, this might return a PDF buffer or a heavily formatted JSON
     tailored for printing/downloading.
     """
-    analysis = _analyses.get(analysis_id)
+    analysis = await repository.get(analysis_id)
     if not analysis:
-        # Hackathon Presentation Fallback: Support the 3 frontend-only mock IDs
-        if analysis_id in ["an-001", "an-hindi", "an-tamil"]:
-            mock_titles = {
-                "an-001": "LED Street Lighting Procurement — Arterial Roads",
-                "an-hindi": "Comprehensive AMC for 168 NOS A.C. Machine",
-                "an-tamil": "168 ஏ.சி. இயந்திரங்களுக்கு முழுமையான பராமரிப்பு",
-            }
-            return {
-                "report_type": "procurement_compliance_report",
-                "generated_at": "2026-08-25T12:00:00",
-                "analysis": {
-                    "id": analysis_id,
-                    "status": "completed",
-                    "tender_title": mock_titles[analysis_id],
-                    "summary": "Analysis identified key requirements and standards for the procurement specification.",
-                    "standards": [
-                        {"id": "std-1", "designation": "IS 10322", "title": "Luminaires / Equipment Standard", "status": "active"},
-                        {"id": "std-2", "designation": "IS 1391", "title": "Room Air Conditioners", "status": "active"}
-                    ],
-                    "findings": [
-                        {"verdict": "compliant", "status": "Reviewed", "reason": "Standard explicitly referenced."},
-                        {"verdict": "gap_found", "status": "Needs Review", "reason": "Missing testing protocol citation."}
-                    ]
-                }
-            }
-        
+        # This used to fall through to three hardcoded reports for the frontend's
+        # mock IDs (an-001 / an-hindi / an-tamil), with invented standards and
+        # findings — including a "compliant" verdict that is not in the Verdict
+        # enum. Any unknown ID now 404s, which is the honest answer: a report is a
+        # document a procurement officer may put in a tender file, and one that
+        # was never produced by an analysis has no business being served.
         raise HTTPException(
             status_code=404,
             detail={
@@ -143,12 +123,13 @@ async def email_pdf_report(analysis_id: str):
     tender_title = analysis_data.get("tender_title", "Untitled Analysis")
     tender_id = analysis_data.get("tender_id") or analysis_id
     status = analysis_data.get("status", "completed")
-    
-    # Mock completeness score if missing from metadata
-    metadata = analysis_data.get("metadata", {})
-    completeness_score = metadata.get("score") if isinstance(metadata, dict) else 95
-    if not completeness_score:
-        completeness_score = 95
+
+    # No computed completeness score is available at this point without
+    # re-running the procurement scoring logic (which lives in the BFF route
+    # and needs the full Analysis object). The n8n template receives the
+    # real issues_found count instead — the only genuinely derived metric
+    # available here. Do not invent a percentage.
+    issues_found = analysis_data.get("issues_found", 0) or 0
         
     # 3. Post to n8n webhook
     webhook_url = os.getenv("N8N_REPORT_WEBHOOK_URL", "https://kakakkakakak.app.n8n.cloud/webhook/send-report")
@@ -163,7 +144,7 @@ async def email_pdf_report(analysis_id: str):
             data = {
                 "tender_title": tender_title,
                 "tender_id": tender_id,
-                "completeness_score": str(completeness_score),
+                "issues_found": str(issues_found),
                 "status": status,
             }
             

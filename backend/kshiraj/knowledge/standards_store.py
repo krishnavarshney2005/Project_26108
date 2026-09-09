@@ -20,6 +20,7 @@ Limitations (intentional for MVP)
 
 from __future__ import annotations
 
+import re
 import threading
 from collections import defaultdict
 from typing import Dict, List, Optional
@@ -40,6 +41,35 @@ def _normalize_is_number(raw: str) -> str:
     Fuzzy/collapsed matching belongs in retrieval_service.py, not here.
     """
     return raw.strip().casefold()
+
+
+def _base_is_number(raw: str) -> str:
+    """Return the part-stripped family key for an IS number.
+
+    BIS publishes many standards only as parts: there is no document numbered
+    plain "IS 10322", only "IS 10322 : Part 1", "IS 10322 : Part 5 : Sec 3" and
+    so on.  Tenders and normative-reference lists nevertheless cite the family —
+    "shall conform to IS 10322" — so an exact-key store cannot resolve a
+    perfectly valid citation.  This key bridges the two.
+
+    Splitting is on the part separator, never by string prefix, so neighbouring
+    numbers stay distinct: "IS 1554 : Part 1" reduces to ``is 1554`` while
+    "IS 15544" reduces to ``is 15544``.
+
+        "IS 10322 : Part 5 : Sec 3"  -> "is 10322"
+        "IS 10322 (Part 5/Sec 3)"    -> "is 10322"
+        "IS 1944 : Part 1 and 2"     -> "is 1944"
+        "IS/IEC 60034 : Part 30"     -> "is/iec 60034"
+        "IS 16107"                   -> "is 16107"   (already a family)
+    """
+    head = re.split(r"[:(/\[]|\bpart\b|\bsec\b", raw.strip(), maxsplit=1,
+                    flags=re.IGNORECASE)[0]
+    # "IS/IEC 60034 : Part 30" must keep its "IS/IEC" prefix, which the "/"
+    # split above would have cut. Restore it when the split landed mid-prefix.
+    if not re.search(r"\d", head):
+        head = re.split(r"[:(\[]|\bpart\b|\bsec\b", raw.strip(), maxsplit=1,
+                        flags=re.IGNORECASE)[0]
+    return " ".join(head.split()).rstrip(",-:").casefold()
 
 
 # ---------------------------------------------------------------------------
@@ -82,6 +112,9 @@ class StandardsStore:
         # Secondary index: normalised is_number -> list[id]
         # Preserves insertion order within each bucket.
         self._by_number: Dict[str, List[str]] = defaultdict(list)
+        # Tertiary index: part-stripped family key -> list[id]. Consulted only
+        # when the exact key misses, so exact lookups keep their old results.
+        self._by_base: Dict[str, List[str]] = defaultdict(list)
 
     # ------------------------------------------------------------------
     # Write operations
@@ -111,6 +144,9 @@ class StandardsStore:
             key = _normalize_is_number(standard.is_number)
             if standard.id not in self._by_number[key]:
                 self._by_number[key].append(standard.id)
+            base = _base_is_number(standard.is_number)
+            if standard.id not in self._by_base[base]:
+                self._by_base[base].append(standard.id)
 
     def upsert(self, standard: Standard) -> None:
         """Insert or replace a standard, keyed by ``id``.
@@ -130,10 +166,21 @@ class StandardsStore:
                 if not self._by_number[old_key]:
                     del self._by_number[old_key]
 
+                old_base = _base_is_number(old.is_number)
+                try:
+                    self._by_base[old_base].remove(old.id)
+                except ValueError:
+                    pass
+                if not self._by_base[old_base]:
+                    del self._by_base[old_base]
+
             self._by_id[standard.id] = standard
             new_key = _normalize_is_number(standard.is_number)
             if standard.id not in self._by_number[new_key]:
                 self._by_number[new_key].append(standard.id)
+            new_base = _base_is_number(standard.is_number)
+            if standard.id not in self._by_base[new_base]:
+                self._by_base[new_base].append(standard.id)
 
     def remove(self, standard_id: str) -> bool:
         """Remove a standard by ``id``.
@@ -155,6 +202,14 @@ class StandardsStore:
                 pass
             if key in self._by_number and not self._by_number[key]:
                 del self._by_number[key]
+
+            base = _base_is_number(standard.is_number)
+            try:
+                self._by_base[base].remove(standard_id)
+            except ValueError:
+                pass
+            if base in self._by_base and not self._by_base[base]:
+                del self._by_base[base]
             return True
 
     # ------------------------------------------------------------------
@@ -175,11 +230,33 @@ class StandardsStore:
 
         All versions and parts sharing the same IS number are returned.
         Order reflects insertion order within the bucket.
+
+        When the exact key misses, the part-stripped family key is tried:
+        ``"IS 10322"`` then resolves to every part of IS 10322, because BIS
+        publishes no such document as plain IS 10322 while tenders and normative
+        reference lists cite it that way.  An exact hit is never overridden by
+        this fallback, so every lookup that already resolved resolves identically.
         """
         key = _normalize_is_number(is_number)
+        base = _base_is_number(is_number)
         with self._lock:
             ids = list(self._by_number.get(key, []))
+            if not ids:
+                ids = list(self._by_base.get(base, []))
             # Resolve IDs inside the lock for a consistent snapshot.
+            return [s for sid in ids if (s := self._by_id.get(sid)) is not None]
+
+    def get_family(self, is_number: str) -> List[Standard]:
+        """Return every part/section of the standard family *is_number* names.
+
+        Unlike :meth:`get_by_is_number` this always widens to the family, so
+        ``"IS 10322 : Part 1"`` returns all five IS 10322 parts.  Use it when
+        the question is "what else belongs to this standard?" rather than
+        "which document did the tender cite?".
+        """
+        base = _base_is_number(is_number)
+        with self._lock:
+            ids = list(self._by_base.get(base, []))
             return [s for sid in ids if (s := self._by_id.get(sid)) is not None]
 
     def list_all(self) -> List[Standard]:
@@ -215,3 +292,4 @@ class StandardsStore:
         with self._lock:
             self._by_id.clear()
             self._by_number.clear()
+            self._by_base.clear()

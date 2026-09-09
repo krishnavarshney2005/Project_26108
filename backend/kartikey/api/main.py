@@ -18,6 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from shared.config import settings
+from shared.config import DEV_API_KEY as _SHIPPED_DEV_API_KEY
 from shared.utils import AppError, get_logger
 
 logger = get_logger(__name__)
@@ -37,15 +38,53 @@ app = FastAPI(
 
 # ---------------------------------------------------------------------------
 # CORS
-# Adjust allow_origins before any production deployment.
 # ---------------------------------------------------------------------------
+origins = [origin.strip() for origin in settings.allowed_origins.split(",") if origin.strip()]
+
+# allow_credentials is deliberately off. The API authenticates with an X-API-Key
+# header, never a cookie, so it has nothing to gain from credentialed requests —
+# and the combination it used to declare (`allow_origins=["*"]` together with
+# `allow_credentials=True`) is not one the CORS spec permits. Starlette answers
+# it with a literal `Access-Control-Allow-Origin: *`, which every browser then
+# refuses to honour for a credentialed request, so the setting bought nothing and
+# broke wildcard origins.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=origins,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+if settings.app_env.lower().startswith("prod"):
+    if settings.allowed_origins.strip() == "*":
+        logger.warning(
+            "CORS is open to every origin in a production environment. Set "
+            "ALLOWED_ORIGINS to the deployed frontend's URL.",
+        )
+    if settings.api_key == _SHIPPED_DEV_API_KEY:
+        logger.warning(
+            "The API key is still the development default that ships in this "
+            "repository, so it is public. Set API_KEY in the environment.",
+        )
+
+# ---------------------------------------------------------------------------
+# API Key Protection
+# ---------------------------------------------------------------------------
+@app.middleware("http")
+async def verify_api_key(request: Request, call_next):
+    # Skip API key check for health, docs, and OPTIONS requests
+    if request.url.path in ["/health", "/docs", "/openapi.json", "/redoc"] or request.method == "OPTIONS":
+        return await call_next(request)
+        
+    api_key = request.headers.get("X-API-Key")
+    if not api_key or api_key != settings.api_key:
+        return JSONResponse(
+            status_code=401,
+            content={"error": "unauthorized", "message": "Invalid or missing X-API-Key header"},
+        )
+        
+    return await call_next(request)
 
 
 # ---------------------------------------------------------------------------
@@ -65,10 +104,12 @@ async def app_error_handler(request: Request, exc: AppError) -> JSONResponse:
 # Uncomment each router as it is implemented.
 # ---------------------------------------------------------------------------
 
-from kartikey.api.routes import documents, analyses, standards, reports, simulator, translation, procurement
+from kartikey.api.routes import documents, analyses, standards, reports, simulator, translation, procurement, extract
 
 app.include_router(documents.router, prefix="/api/v1")
 app.include_router(analyses.router,  prefix="/api/v1")
+app.include_router(extract.router, prefix="/api/v1")
+
 app.include_router(standards.router, prefix="/api/v1")
 app.include_router(reports.router,   prefix="/api/v1")
 app.include_router(simulator.router, prefix="/api/v1")

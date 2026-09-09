@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { API_ROOT } from '@/services/api';
+import { API_ROOT, API_KEY } from '@/services/api';
 import {
   Award,
   Calendar,
@@ -32,6 +32,7 @@ import { Button } from '@/components/ui/Button';
 import { Avatar } from '@/components/ui/Avatar';
 import { useRouter } from '@/router';
 import { reports, getAnalysisById } from '@/data/mockData';
+import { listRealAnalyses } from '@/data/runtimeStore';
 import { formatDate } from '@/utils/format';
 import type { Report, ReportType } from '@/data/types';
 
@@ -40,6 +41,22 @@ const reportTypeConfig: Record<ReportType, { label: string; icon: typeof FileTex
   'gap-analysis': { label: 'Specification Quality Audit', icon: ListChecks, accent: 'text-amber-700 bg-amber-50 dark:bg-amber-950/60 dark:text-amber-300' },
   certification: { label: 'Regulatory & Certification Brief', icon: Award, accent: 'text-blue-700 bg-blue-50 dark:bg-blue-950/60 dark:text-blue-300' },
 };
+
+// Synthesize report entries for any real analyses registered this session.
+// These are prepended so real submissions appear above the demo showcases.
+function getRealReports(): Report[] {
+  return listRealAnalyses().map((a) => ({
+    id: `real-${a.id}`,
+    analysisId: a.id,
+    title: a.tenderTitle || a.id,
+    type: 'compliance' as ReportType,
+    generatedAt: a.createdAt || new Date().toISOString(),
+    format: 'PDF' as const,
+    pages: 0,
+    status: 'ready' as const,
+    author: 'StandIQ Intelligence Engine',
+  }));
+}
 
 export function ReportsPage() {
   const { navigate } = useRouter();
@@ -51,7 +68,7 @@ export function ReportsPage() {
   const handleEmailReport = async (reportId: string, analysisId: string) => {
     setIsEmailing(reportId);
     try {
-      const res = await fetch(`${API_ROOT}/analyses/${analysisId}/report/email`, { method: 'POST' });
+      const res = await fetch(`${API_ROOT}/analyses/${analysisId}/report/email`, { method: 'POST', headers: { 'X-API-Key': API_KEY } });
       if (!res.ok) throw new Error('Failed to send email via n8n');
       alert('Report successfully dispatched for email delivery via n8n!');
     } catch (err) {
@@ -61,8 +78,10 @@ export function ReportsPage() {
     }
   };
 
-  const filtered = reports.filter((r) => {
+  const allReports = [...getRealReports(), ...reports];
+  const filtered = allReports.filter((r) => {
     if (search && !r.title.toLowerCase().includes(search.toLowerCase())) return false;
+
     if (typeFilter !== 'all' && r.type !== typeFilter) return false;
     return true;
   });

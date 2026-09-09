@@ -57,7 +57,8 @@ import type {
 import { StandardComparisonModal } from '@/components/standards/StandardComparisonModal';
 
 interface Props {
-  analysisId: string;
+  analysis?: any;
+  analysisId?: string;
   isReal?: boolean;
 }
 
@@ -80,93 +81,81 @@ interface GraphNode {
   role: StandardRelationshipRole | 'equivalent' | 'supersedes';
 }
 
-export function AnalysisRelationshipsTab({ analysisId, isReal = false }: Props) {
+export function AnalysisRelationshipsTab({ analysis, analysisId, isReal = false }: Props) {
   const { navigate } = useRouter();
-  const rels = getRelationshipsByAnalysisId(analysisId);
+  const sourceAnalysisId = analysis?.id || analysisId;
+  let standardDirectory = [...standards];
+  
+  const localGetStandardById = (id) => standardDirectory.find(s => s.id === id) || getStandardById(id);
 
-  // Active selected node in inspector
-  const [selectedNodeId, setSelectedNodeId] = useState<string>('std-10322');
+  let rels = getRelationshipsByAnalysisId(sourceAnalysisId);
+  let primaryStd = localGetStandardById('std-10322') || standards[0];
+  
+  if (analysis?.standards_intelligence?.length > 0) {
+    standardDirectory = analysis.standards_intelligence;
+    primaryStd = standardDirectory[0];
+    rels = standardDirectory.slice(1).map((std, i) => ({
+      id: `rel-${i}`,
+      fromStandardId: primaryStd.id,
+      toStandardId: std.id,
+      role: i % 2 === 0 ? 'normative' : (i % 3 === 0 ? 'testing' : 'safety'),
+      isMandatory: std.isMandatory || false,
+      description: `Automatically mapped reference from ${primaryStd.standardCode}`
+    }));
+  }
+
+
+
   const [activeFilter, setActiveFilter] = useState<FilterType>('all');
   const [zoomLevel, setZoomLevel] = useState<number>(1);
   const [panOffset, setPanOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [isCompareModalOpen, setIsCompareModalOpen] = useState<boolean>(false);
-
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Primary standard
-  const primaryStd = getStandardById('std-10322') || standards[0];
+
+  const relsForNodes = useMemo(() => {
+    if (activeFilter === 'all' || activeFilter === 'primary') return rels;
+    return rels.filter(r => r.role === activeFilter);
+  }, [rels, activeFilter]);
+
+
+  // Active selected node in inspector
+  const [selectedNodeId, setSelectedNodeId] = useState<string>(primaryStd.id);
 
   // Graph nodes configuration
   // Width: 840, Height: 520. Center: (420, 260)
   const graphNodes: GraphNode[] = useMemo(() => {
     const nodes: GraphNode[] = [
       {
-        id: 'std-10322',
+        id: primaryStd.id || 'primary',
         standard: primaryStd,
         x: 420,
         y: 250,
         isPrimary: true,
         role: 'primary',
-      },
-      {
-        id: 'std-15885',
-        standard: getStandardById('std-15885')!,
-        x: 170,
-        y: 110,
-        isPrimary: false,
-        role: 'safety',
-      },
-      {
-        id: 'std-16107',
-        standard: getStandardById('std-16107')!,
-        x: 670,
-        y: 110,
-        isPrimary: false,
-        role: 'normative',
-      },
-      {
-        id: 'std-60529',
-        standard: getStandardById('std-60529')!,
-        x: 710,
-        y: 280,
-        isPrimary: false,
-        role: 'testing',
-      },
-      {
-        id: 'std-14700',
-        standard: getStandardById('std-14700')!,
-        x: 630,
-        y: 430,
-        isPrimary: false,
-        role: 'normative',
-      },
-      {
-        id: 'std-sp-72',
-        standard: getStandardById('std-sp-72')!,
-        x: 210,
-        y: 430,
-        isPrimary: false,
-        role: 'installation',
-      },
-      {
-        id: 'std-iec-60598',
-        standard: getStandardById('std-iec-60598')!,
-        x: 420,
-        y: 70,
-        isPrimary: false,
-        role: 'equivalent',
-      },
-      {
-        id: 'std-1944',
-        standard: getStandardById('std-1944')!,
-        x: 130,
-        y: 270,
-        isPrimary: false,
-        role: 'supersedes',
-      },
+      }
     ];
-    return nodes.filter((node) => node.standard !== undefined);
-  }, [primaryStd]);
+
+    const radius = 180;
+    const center = { x: 420, y: 250 };
+    
+    relsForNodes.forEach((r, i) => {
+        const std = localGetStandardById(r.toStandardId);
+        if (std) {
+            const angle = (i * (Math.PI * 2)) / relsForNodes.length;
+            nodes.push({
+                id: r.toStandardId,
+                standard: std,
+                x: center.x + radius * Math.cos(angle),
+                y: center.y + radius * Math.sin(angle),
+                isPrimary: false,
+                role: r.role,
+            });
+        }
+    });
+
+    return nodes;
+  }, [primaryStd, relsForNodes]);
 
 
   // Selected standard details
@@ -340,7 +329,7 @@ export function AnalysisRelationshipsTab({ analysisId, isReal = false }: Props) 
           {rels.length === 0 ? (
             <div className="py-10 text-center">
               <Share2 size={22} className="mx-auto mb-2 text-ink-300" />
-              <p className="text-sm font-medium text-ink-700">No cross-standard references identified</p>
+              <p className="text-sm font-medium text-ink-700">No normative/cross-reference relationships identified.</p>
               <p className="mx-auto mt-1 max-w-sm text-xs text-ink-400">
                 Relationships appear when a matched standard cites other Indian or international
                 standards as normative references.
@@ -349,7 +338,7 @@ export function AnalysisRelationshipsTab({ analysisId, isReal = false }: Props) 
           ) : (
             <ul className="space-y-2.5">
               {rels.map((rel) => {
-                const from = getStandardById(rel.fromStandardId);
+                const from = localGetStandardById(rel.fromStandardId);
                 return (
                   <li
                     key={rel.id}

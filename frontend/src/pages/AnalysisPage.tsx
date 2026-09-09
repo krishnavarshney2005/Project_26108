@@ -210,7 +210,7 @@ export function AnalysisPage({ analysisId, tab }: Props) {
       case 'standards':
         return <AnalysisStandardsTab analysis={analysis} />;
       case 'relationships':
-        return <AnalysisRelationshipsTab analysisId={analysis.id} isReal={isReal} />;
+        return <AnalysisRelationshipsTab analysis={analysis} isReal={isReal} />;
       case 'gaps':
         return <AnalysisGapsTab analysisId={analysis.id} />;
       case 'certification':
@@ -255,7 +255,7 @@ export function AnalysisPage({ analysisId, tab }: Props) {
                 {analysis.confidence > 0 && (
                   <>
                     <span>·</span>
-                    <Badge variant="teal">{analysis.confidence}% applicability</Badge>
+                    <Badge variant="teal">{analysis.confidence}% avg. confidence</Badge>
                   </>
                 )}
               </div>

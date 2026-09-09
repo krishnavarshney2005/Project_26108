@@ -78,6 +78,24 @@ class CertificationScheme(str, Enum):
     OTHER = "other"
 
 
+class DataAvailability(str, Enum):
+    """
+    Whether a field's value is actually known, and how well.
+
+    This is a first-class value rather than a null because the two situations a
+    null conflates need different responses from a procurement officer:
+    "BIS does not publish this" is a fact about the standard, while "we have a
+    value but nobody checked it" is a caveat on our own data. A frontend that
+    only sees `null` cannot tell them apart, and renders both as a blank cell.
+
+    NOT_AVAILABLE is used where the source catalogue genuinely carries nothing.
+    It is never used to hide a value we could have imported.
+    """
+    VERIFIED = "verified"            # present, and provenance confirmed at source
+    UNVERIFIED = "unverified"        # present, but provenance not confirmed
+    NOT_AVAILABLE = "not_available"  # the source catalogue carries no value
+
+
 class DocumentType(str, Enum):
     """BIS document types as classified on the BIS portal."""
     PRODUCT_SPECIFICATION = "product_specification"
@@ -229,10 +247,25 @@ class Standard(BaseModel):
     # ------------------------------------------------------------------
     title: str
     scope: str | None = None               # text describing coverage and exclusions
+    # Standards a procurement officer cannot ignore once this one is cited.
+    # normative_references are binding (the citing standard's requirements are
+    # only meaningful if these are also met); related_standards are informative.
+    # Both hold designation strings as the catalogue records them
+    # ("IS 10322 : Part 1"), not resolved Standard objects — the enrichment layer
+    # resolves them against the store when it needs the object.
+    normative_references: list[str] = []
+    related_standards: list[str] = []
     document_type: DocumentType = DocumentType.OTHER
     ics_code: str | None = None            # ICS taxonomy code e.g. "91.100.10"
     division_council: str | None = None    # BIS Division Council (sector)
     technical_committee: str | None = None # committee responsible
+
+    # Catalogue-supplied descriptors. Useful to a procurement officer in their own
+    # right ("which tests does this standard actually prescribe?") and to the
+    # frontend's standards map, which groups by product category.
+    keywords: list[str] = []
+    product_categories: list[str] = []     # e.g. ["Lighting & LED"]
+    test_methods: list[str] = []           # e.g. ["IPX9 ingress protection"]
 
     # ------------------------------------------------------------------
     # Status and lifecycle
@@ -240,8 +273,16 @@ class Standard(BaseModel):
     status: StandardStatus = StandardStatus.UNKNOWN
     reaffirmation_year: int | None = None  # set if status == REAFFIRMED
     superseded_by: str | None = None       # IS number of replacement (if SUPERSEDED)
+    supersedes: str | None = None           # edition this one replaced, as catalogued
     transition_deadline: date | None = None  # when superseded version becomes invalid
     withdrawal_date: date | None = None    # set if status == WITHDRAWN
+
+    # The newest edition the catalogue knows of. Usually equals `year`; it differs
+    # when the record we hold is not the latest, which is exactly the case
+    # VersionChecker exists to catch. Kept separate from `year` so "the edition
+    # this record describes" and "the newest edition that exists" never merge.
+    latest_known_edition: str | None = None
+    latest_known_year: int | None = None
 
     # ------------------------------------------------------------------
     # QCO and certification
@@ -258,10 +299,29 @@ class Standard(BaseModel):
     source_url: str | None = None          # canonical BIS page URL
     retrieved_at: datetime | None = None
 
+    # Where this record came from, verbatim from the reconciled catalogue:
+    #   {"organization": "BIS", "source_type": "bis.gov.in",
+    #    "verified": true, "url": null, "record_source": "curated_additions"}
+    # The report's provenance column reads this. A record whose provenance is
+    # unverified is still usable — it just cannot be presented as authoritative.
+    provenance: dict[str, Any] | None = None
+
+    # Per-field availability, keyed by field name, values from DataAvailability:
+    #   {"scope": "verified", "certification": "not_available",
+    #    "normative_references": "verified", "currentness": "unverified"}
+    #
+    # Populated by the catalogue loader. Everything downstream — the API, the PDF,
+    # the frontend badges — reads this instead of inferring meaning from an empty
+    # value, so "BIS publishes no scope for this standard" and "we failed to load
+    # a scope" stop looking identical.
+    field_availability: dict[str, str] = {}
+
     # ------------------------------------------------------------------
     # For retrieval (populated by kshiraj/knowledge)
     # ------------------------------------------------------------------
     relevance_score: float | None = None   # set by retrieval service, not stored
+    semantic_score: float | None = None   # set by retrieval service, for ML reasoning
+
     text_excerpt: str | None = None        # relevant excerpt for evidence
 
     # ------------------------------------------------------------------
@@ -297,6 +357,7 @@ class Evidence(BaseModel):
     source_type: EvidenceSourceType
     source_name: str                        # human-readable source name
     authority: str | None = None            # issuing body: "BIS", "DPIIT", "MeitY", etc.
+    category: str = "clause"                # "metadata" or "clause"
 
     # Location within the source
     url: str | None = None
@@ -305,7 +366,7 @@ class Evidence(BaseModel):
     document_section: str | None = None    # broader section in the document
 
     # The actual evidence text
-    excerpt: str = ""
+    excerpt: str | None = None
 
     # Gazette-specific (QCO, amendment notifications)
     gazette_so_number: str | None = None   # e.g. "S.O. 219(E)"
@@ -377,6 +438,8 @@ class Finding(BaseModel):
     Standard and Evidence objects from the database — the LLM does not generate them.
 
     currentness: describes the version situation detected
+    dimensions: the per-axis assessment behind the single headline verdict
+    cross_references: standards this one depends on, and which are uncited
     applicable_standards: the standards the system determined are relevant
     evidence: the evidence backing this finding
     """
@@ -391,6 +454,22 @@ class Finding(BaseModel):
     # What standards are actually applicable (may differ from what tender cited)
     applicable_standards: list[Standard] = []
 
+    # Standards the tender cites that were assessed and found NOT to govern this
+    # requirement — the "cited but not applicable" case.
+    #
+    # Three things a report must not conflate: a standard retrieval found
+    # similar, a standard the tender names, and a standard that actually governs
+    # the requirement. A tender specifying XLPE insulation while citing IS 1554
+    # (PVC) has named a real, active, correctly-numbered standard that does not
+    # cover its product. Leaving it in `applicable_standards` tells the officer
+    # the citation is fine; dropping it entirely loses the citation they need to
+    # fix. It belongs here, with `dimensions["scope"]` saying why.
+    #
+    # Everything the enrichment layer produced about it — status, currentness,
+    # QCO, evidence, cross-references — is still reported, because the officer
+    # needs all of it precisely because the tender cites it.
+    cited_standards: list[Standard] = []
+
     # Version/currentness details (populated by enrichment layer)
     currentness: dict[str, Any] | None = None
     # e.g. {
@@ -400,8 +479,50 @@ class Finding(BaseModel):
     #   "transition_deadline": "2024-01-01"
     # }
 
+    # Per-dimension assessment, populated by the enrichment layer.
+    #
+    # `verdict` above is a single headline value because that is what the API
+    # contract and the frontend badge switch on. But "the tender cites a 2012
+    # edition" and "this clause narrows the vendor pool" are independent
+    # judgements, and the severe one used to silently replace the other. This
+    # field keeps each axis intact so the headline is explained rather than
+    # substituted:
+    #   {
+    #     "applicability":  {"verdict": "potentially_over_restrictive", "confidence": 0.72,
+    #                        "source": "ai"},
+    #     "currentness":    {"label": "OUTDATED", "verdict": "outdated_reference",
+    #                        "gap_years": 10, "source": "version_checker"},
+    #     "certification":  {"qco_notified": true, "scheme": "isi_mark"},
+    #     "headline":       {"verdict": "outdated_reference", "resolution": "compliance_override"}
+    #   }
+    dimensions: dict[str, Any] | None = None
+
+    # Standards the cited standard itself depends on, and which of those the
+    # tender never mentions. A tender that cites IS 16107 but not the IS 10322
+    # it normatively references is incomplete even though every citation in it
+    # is individually valid. One entry per applicable standard that has
+    # references; see kshiraj/enrichment/crossref_extractor.py.
+    cross_references: list[dict[str, Any]] = []
+
     # Evidence backing this finding
     evidence: list[Evidence] = []
+
+    # Per-section availability, one entry per optional block the report renders.
+    #
+    # An empty `cross_references` is ambiguous on its own: it means either "this
+    # standard publishes no normative references" or "the enrichment step never
+    # ran". The frontend cannot tell those apart, so it either renders a blank
+    # panel that looks broken or invents reassuring text. This field removes the
+    # ambiguity by stating which it is, per section:
+    #
+    #   verified        real data is present in this section
+    #   not_available   the source genuinely does not publish it
+    #   not_assessed    the check could not run (a stage was unavailable)
+    #   not_identified  the check ran and found nothing to report
+    #
+    # Populated by kartikey/analysis/findings.py. Never a substitute for data:
+    # a section marked not_available stays empty, it is only labelled.
+    data_availability: dict[str, str] = {}
 
     # Confidence and verification
     confidence: float                       # 0.0–1.0

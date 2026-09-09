@@ -29,7 +29,6 @@ function cleanTitle(raw = ''): string {
   return t.trim().replace(/\s+/g, ' ');
 }
 
-// Backend confidence may arrive as 0..1 or 0..100 — normalise to 0..1.
 function norm(c: unknown): number {
   const n = typeof c === 'number' ? c : Number(c) || 0;
   return n > 1 ? n / 100 : n;
@@ -65,7 +64,11 @@ function verdictToSpecStatus(verdict = ''): SpecificationRequirement['status'] {
   const v = verdict.toLowerCase();
   if (v === 'justified') return 'covered';
   if (v.includes('restrict')) return 'restrictive';
-  if (v.includes('conflict')) return 'conflicting';
+  // A standard cited outside its scope, or simply the wrong standard, is a
+  // conflict between the specification and the citation — not a generic
+  // "needs a look". These are the findings the product exists to produce, and
+  // 'review' buried them in with everything else.
+  if (v.includes('conflict') || v.includes('wrong_scope') || v.includes('incorrect')) return 'conflicting';
   if (v.includes('missing') || v.includes('not_found') || v.includes('absent')) return 'missing';
   return 'review';
 }
@@ -84,6 +87,62 @@ function verdictToEvidenceStatus(verdict = ''): EvidenceChainItem['status'] {
   if (v.includes('missing') || v.includes('not_found') || v.includes('absent')) return 'not-found';
   if (v.includes('partial')) return 'partial';
   return 'needs-review';
+}
+
+function cleanReasoning(reason: string = ''): string {
+  if (!reason) return '';
+  if (reason.includes('429 RESOURCE_EXHAUSTED')) {
+    // Return a clean user-facing error message instead of the raw JSON dump
+    return "AI reasoning unavailable: Gemini API quota exceeded (429 RESOURCE_EXHAUSTED). The requirement was processed using fallback logic.";
+  }
+  return reason;
+}
+
+// ---- cited vs applicable ---------------------------------------------------
+//
+// The backend keeps these apart on purpose. `applicable_standards` are the ones
+// that genuinely govern the requirement; `cited_standards` are what the tender
+// actually named. Usually they overlap. When the tender names the wrong
+// standard they do not: applicable comes back empty and the offending citation
+// sits in cited_standards with `dimensions.scope` explaining why.
+//
+// Reading only `applicable_standards[0]` therefore blanked out the single most
+// valuable finding the system produces — a tender specifying XLPE while citing
+// IS 1554, which covers PVC, rendered as "Not mapped" with the reason dropped.
+// The analysis had identified the standard, named the correct alternatives, and
+// none of it reached the screen.
+
+function displayStandard(f: any): { std: any; wronglyCited: boolean } {
+  const applicable = f?.applicable_standards?.[0];
+  if (applicable) return { std: applicable, wronglyCited: false };
+  const cited = f?.cited_standards?.[0];
+  if (cited) return { std: cited, wronglyCited: true };
+  return { std: undefined, wronglyCited: false };
+}
+
+// What to show where a standard designation is expected. "Not mapped" is only
+// honest when nothing was identified at all; when a standard was cited and
+// judged inapplicable, saying so is the finding.
+function standardLabel(f: any, absent: string): string {
+  const { std, wronglyCited } = displayStandard(f);
+  if (!std) return absent;
+  const designation = std.designation || std.is_number || absent;
+  return wronglyCited ? `${designation} (cited — see finding)` : designation;
+}
+
+// The deterministic scope check's own words, when it made a judgement. Prefer
+// it over the generic reasoning: it names the material, the standard's actual
+// coverage, and the alternatives in the catalogue.
+function scopeNote(f: any): string {
+  const scope = f?.dimensions?.scope;
+  return scope?.assessed && scope?.mismatch && scope?.note ? String(scope.note) : '';
+}
+
+function explain(f: any): string {
+  const note = scopeNote(f);
+  const reason = cleanReasoning(f?.reason || '');
+  if (!note) return reason;
+  return reason ? `${note}\n\n${reason}` : note;
 }
 
 // ---- standards -------------------------------------------------------------
@@ -121,9 +180,12 @@ export function adaptStandard(raw: any): Standard {
     amendments: raw.amendments || [],
     internationalEquivalents: raw.ics_code ? [raw.ics_code] : [],
     technicalCoverage: raw.text_excerpt || undefined,
-    whyApplies: raw.why_recommended || raw.text_excerpt || scope,
-    applicabilityScore: typeof raw.relevance_score === 'number' ? Math.round(norm(raw.relevance_score) * 100) : undefined,
+    whyApplies: cleanReasoning(raw.why_recommended || raw.text_excerpt || scope),
+    applicabilityScore: raw.applicability_score ? Math.round(norm(raw.applicability_score) * 100) : undefined,
     evidenceAvailable: Array.isArray(raw.evidence) ? raw.evidence.length > 0 : undefined,
+    bisSourceUrl: raw.source_url || (raw.provenance?.url) || undefined,
+    retrievedAt: raw.retrieved_at || undefined,
+    fieldAvailability: raw.field_availability || undefined,
   };
 }
 
@@ -158,17 +220,17 @@ export function adaptAnalysis(raw: any): AdaptedAnalysis {
 
   const matchedRequirements: MatchedRequirementItem[] = requirements.map((r) => {
     const f = findingFor(r.id);
-    const std = f?.applicable_standards?.[0];
+    const { std } = displayStandard(f);
     return {
       id: r.id,
       requirement: r.text || r.category || 'Requirement',
       parameterValue: '', // backend requirements carry no separate value field
 
-      standardCode: std?.designation || 'Not mapped',
+      standardCode: standardLabel(f, 'Not mapped'),
       standardId: std?.id ? String(std.id) : '',
       clause: r.location || '',
       status: verdictToMatchedStatus(f?.verdict),
-      evidenceSnippet: f?.evidence?.[0]?.excerpt,
+      evidenceSnippet: scopeNote(f) || f?.evidence?.[0]?.excerpt,
       evidenceSource: f?.evidence?.[0]?.authority || f?.evidence?.[0]?.source_type,
       reviewConfidence: confBand(f?.confidence ?? r.extraction_confidence),
     };
@@ -176,18 +238,18 @@ export function adaptAnalysis(raw: any): AdaptedAnalysis {
 
   const specRequirements: SpecificationRequirement[] = requirements.map((r) => {
     const f = findingFor(r.id);
-    const std = f?.applicable_standards?.[0];
+    const { std } = displayStandard(f);
     return {
       id: r.id,
       analysisId,
       requirement: r.text || r.category || 'Requirement',
       tenderEvidence: f?.evidence?.[0]?.excerpt || r.text || '',
       tenderSection: r.location || r.category?.replace(/_/g, ' ') || '',
-      applicableStandard: std?.designation || 'Not mapped',
+      applicableStandard: standardLabel(f, 'Not mapped'),
       standardId: std?.id ? String(std.id) : '',
       clause: '',
       status: verdictToSpecStatus(f?.verdict),
-      whyMatters: f?.reason || '',
+      whyMatters: explain(f),
       supportingEvidence: f?.evidence?.[0]?.excerpt,
       suggestedAction: f?.recommended_action,
       reviewConfidence: confBand(f?.confidence ?? r.extraction_confidence),
@@ -215,19 +277,19 @@ export function adaptAnalysis(raw: any): AdaptedAnalysis {
   const evidence: EvidenceChainItem[] = findings.map((f) => {
     const r = requirements.find((x) => x.id === f.requirement_id);
     const ev = f.evidence?.[0];
-    const std = f.applicable_standards?.[0];
+    const { std } = displayStandard(f);
     return {
       id: f.id,
       analysisId,
       requirement: r?.text || String(f.verdict || '').replace(/_/g, ' ') || 'Finding',
-      standard: std?.designation || 'No mapped standard',
+      standard: standardLabel(f, 'No mapped standard'),
       standardId: std?.id ? String(std.id) : undefined,
       clause: '',
       evidence: ev?.excerpt || f.reason || '',
       sourceDoc: ev?.authority || ev?.source_type || 'Procurement analysis',
       sourceLocation: ev?.gazette_so_number || ev?.source_type || '',
       status: verdictToEvidenceStatus(f.verdict),
-      conclusion: f.reason || '',
+      conclusion: explain(f),
       reviewConfidence: confBand(f.confidence),
     };
   });
@@ -255,12 +317,17 @@ export function adaptAnalysis(raw: any): AdaptedAnalysis {
     status: mapAnalysisStatus(raw?.status),
     createdAt: raw?.created_at || '',
     completedAt: raw?.updated_at || null,
-    documentCount: raw?.tender_id ? 1 : 0,
+    documentCount: raw?.input_type?.toLowerCase() === 'document' ? 1 : 0,
     standardsIdentified: standards.length,
     gapsFound,
     certificationsRequired: regulatory.length,
     confidence: avgConfidence,
-    summary: raw?.degraded_reason || null,
+    // The backend writes a real one-line summary ("3 requirement(s) analysed
+    // against 1 BIS standard(s)…"). It used to be discarded in favour of
+    // degraded_reason, which is null on a healthy run — so the summary line was
+    // blank exactly when the analysis had gone well. degradedReason is returned
+    // separately below and the banner reads it from there.
+    summary: raw?.summary || raw?.degraded_reason || null,
     matchedStandardIds: standards.map((s) => s.id),
     gapIds: specRequirements.filter((s) => s.status !== 'covered').map((s) => s.id),
     documentIds: raw?.tender_id ? [String(raw.tender_id)] : [],
@@ -291,7 +358,7 @@ export function adaptAnalysisSummary(raw: any): Analysis {
     status: mapAnalysisStatus(raw?.status),
     createdAt: raw?.created_at || '',
     completedAt: raw?.updated_at || null,
-    documentCount: raw?.tender_id ? 1 : 0,
+    documentCount: raw?.input_type?.toLowerCase() === 'document' ? 1 : 0,
     standardsIdentified: 0,
     gapsFound: raw?.issues_found ?? 0,
     certificationsRequired: 0,

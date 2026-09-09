@@ -48,7 +48,12 @@ def generate_pdf_report(analysis_data: dict) -> bytes:
     # Executive Summary
     elements.append(Paragraph("Executive Summary", h2_style))
     elements.append(Spacer(1, 5))
-    summary_text = analysis_data.get('summary', 'No summary available.')
+    # .get() with a default is not enough: summary is Optional on the model, so
+    # the key exists and holds None for a run that produced no summary (a
+    # partially_completed analysis, which this route deliberately serves). None
+    # reaches Paragraph and raises AttributeError, which surfaced as a 500 on
+    # GET /report/pdf rather than as a report saying it has no summary.
+    summary_text = analysis_data.get('summary') or 'No summary was produced for this analysis.'
     elements.append(Paragraph(summary_text, normal_style))
     elements.append(Spacer(1, 20))
     
@@ -60,10 +65,15 @@ def generate_pdf_report(analysis_data: dict) -> bytes:
     if standards:
         std_data = [["Standard Code", "Title", "Status"]]
         for s in standards:
+            # No default of 'active'. A printed report telling a procurement
+            # officer a standard is ACTIVE when the catalogue does not record its
+            # status is a claim the system cannot support, and this document may
+            # end up in a tender file.
+            raw_status = (s.get('status') or '').strip()
             std_data.append([
                 s.get('designation') or s.get('id', ''),
                 Paragraph(s.get('title', ''), normal_style),
-                s.get('status', 'active')
+                'Not stated' if raw_status in ('', 'unknown') else raw_status.upper()
             ])
         std_table = Table(std_data, colWidths=[100, 320, 80])
         std_table.setStyle(TableStyle([
@@ -86,14 +96,32 @@ def generate_pdf_report(analysis_data: dict) -> bytes:
     
     findings = analysis_data.get('findings', [])
     if findings:
-        find_data = [["Finding", "Status", "Reason"]]
+        # Findings key off requirement_id, so the requirement text has to be
+        # looked up to make a row traceable. Without it the table said "this
+        # verdict, for something" and the reader had no way back to the clause.
+        requirements = {
+            r.get('id'): r for r in analysis_data.get('requirements', []) or []
+        }
+
+        find_data = [["Tender Requirement", "Verdict", "Currentness", "Basis"]]
         for f in findings:
+            req = requirements.get(f.get('requirement_id')) or {}
+            req_text = (req.get('text') or '').strip() or 'Requirement text unavailable'
+
+            # The old third column was f.get('status', 'Reviewed'). Finding has no
+            # status field, so every row printed the literal "Reviewed" — a
+            # fabricated column in a document an officer may rely on. The
+            # currentness label is the real per-finding verdict on that axis.
+            currentness = (f.get('dimensions') or {}).get('currentness') or {}
+            label = currentness.get('label') or 'Not assessed'
+
             find_data.append([
+                Paragraph(req_text, normal_style),
                 Paragraph(f.get('verdict', '').replace('_', ' ').title(), normal_style),
-                f.get('status', 'Reviewed'),
+                Paragraph(str(label).replace('_', ' ').title(), normal_style),
                 Paragraph(f.get('reason', ''), normal_style)
             ])
-        find_table = Table(find_data, colWidths=[120, 80, 300])
+        find_table = Table(find_data, colWidths=[130, 85, 80, 220])
         find_table.setStyle(TableStyle([
             ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#f3f4f6')),
             ('TEXTCOLOR', (0,0), (-1,0), colors.HexColor('#1f2937')),

@@ -53,23 +53,11 @@ interface Props {
 export function AnalysisGapsTab({ analysisId }: Props) {
   const { navigate } = useRouter();
   const rawRequirements = getSpecificationRequirementsByAnalysisId(analysisId);
-
-  // Seeded demo ids keep their curated headline numbers; real analyses compute
-  // the coverage strip and filter counts from the actual requirement verdicts.
   const isReal = !isSeededAnalysisId(analysisId);
-  const total = rawRequirements.length;
-  const coveredCount = rawRequirements.filter((r) => r.status === 'covered').length;
-  const reviewCount = rawRequirements.filter((r) => r.status === 'review').length;
-  const missingCount = rawRequirements.filter((r) => r.status === 'missing').length;
-  const conflictingCount = rawRequirements.filter((r) => r.status === 'conflicting').length;
-  const restrictiveCount = rawRequirements.filter((r) => r.status === 'restrictive').length;
-  const coveragePct = total ? Math.round((coveredCount / total) * 100) : 0;
 
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<SpecificationRequirementStatus | 'all'>('all');
-  const [selectedReqId, setSelectedReqId] = useState<string | null>(rawRequirements[0]?.id || null);
-  const [isDrawerOpen, setIsDrawerOpen] = useState<boolean>(true);
-
+  
   // Local human review decisions
   const [decisions, setDecisions] = useState<Record<string, HumanDecision>>({
     'req-sp-1': 'accepted',
@@ -87,9 +75,48 @@ export function AnalysisGapsTab({ analysisId }: Props) {
     setDecisions((prev) => ({ ...prev, [reqId]: decision }));
   };
 
+  // Compute effective requirements by layering officer decisions over AI verdicts
+  const effectiveRequirements = useMemo(() => {
+    return rawRequirements.map((req) => {
+      const decision = decisions[req.id];
+      let effectiveStatus = req.status;
+
+      if (decision === 'accepted') {
+        effectiveStatus = 'covered';
+      } else if (decision === 'reviewed') {
+        effectiveStatus = 'review';
+      } else if (decision === 'rejected') {
+        effectiveStatus = (req.status === 'conflicting' || req.status === 'restrictive') 
+          ? req.status 
+          : 'missing';
+      }
+
+      return {
+        ...req,
+        status: effectiveStatus,
+        aiStatus: req.status, // Preserve original
+        decision: decision || req.decision,
+      };
+    });
+  }, [rawRequirements, decisions]);
+
+  const [selectedReqId, setSelectedReqId] = useState<string | null>(effectiveRequirements[0]?.id || null);
+  const [isDrawerOpen, setIsDrawerOpen] = useState<boolean>(true);
+
+  // Seeded demo ids keep their curated headline numbers; real analyses compute
+  // the coverage strip and filter counts from the actual requirement verdicts.
+  const total = effectiveRequirements.length;
+  const coveredCount = effectiveRequirements.filter((r) => r.status === 'covered').length;
+  const reviewCount = effectiveRequirements.filter((r) => r.status === 'review').length;
+  const missingCount = effectiveRequirements.filter((r) => r.status === 'missing').length;
+  const conflictingCount = effectiveRequirements.filter((r) => r.status === 'conflicting').length;
+  const restrictiveCount = effectiveRequirements.filter((r) => r.status === 'restrictive').length;
+  const coveragePct = total ? Math.round((coveredCount / total) * 100) : 0;
+
+
   // Filter requirements
   const filteredRequirements = useMemo(() => {
-    return rawRequirements.filter((req) => {
+    return effectiveRequirements.filter((req) => {
       if (search) {
         const q = search.toLowerCase();
         const matchReq = req.requirement.toLowerCase().includes(q);
@@ -102,17 +129,17 @@ export function AnalysisGapsTab({ analysisId }: Props) {
       }
       return true;
     });
-  }, [rawRequirements, search, statusFilter]);
+  }, [effectiveRequirements, search, statusFilter]);
 
   // Selected requirement in drawer
   const selectedReq = useMemo(() => {
-    return rawRequirements.find((r) => r.id === selectedReqId) || rawRequirements[0];
-  }, [rawRequirements, selectedReqId]);
+    return effectiveRequirements.find((r) => r.id === selectedReqId) || effectiveRequirements[0];
+  }, [effectiveRequirements, selectedReqId]);
 
   // Potential restrictiveness flagged items
   const restrictiveItems = useMemo(() => {
-    return rawRequirements.filter((r) => r.status === 'restrictive');
-  }, [rawRequirements]);
+    return effectiveRequirements.filter((r) => r.status === 'restrictive');
+  }, [effectiveRequirements]);
 
   // Status badge helper with explicit text
   const renderStatusBadge = (status: SpecificationRequirementStatus) => {

@@ -15,6 +15,7 @@ import logging
 import os
 import uuid
 
+from src.reasoning.providers.ml import MLReasoner
 from src.reasoning.providers.mock import MockReasoner
 from src.reasoning.providers.gemini import GeminiReasoner
 
@@ -48,16 +49,50 @@ def _classify_requirement(text: str) -> str:
 
 class Analyzer:
     def __init__(self):
-        mode = os.getenv("AI_MODE", "gemini")
+        # AI_MODE selects the reasoning provider:
+        #   "ml"     — the trained applicability model, offline and deterministic
+        #   "mock"   — keyword heuristics, for tests and local development
+        #   anything else (default) — Gemini
+        #
+        # MLReasoner was imported here but never constructed, so the applicability
+        # model could not be reached through /analyze at all no matter how the
+        # environment was configured. It is also the right thing to fall back to
+        # when Gemini cannot start: the model is real and offline, whereas the
+        # mock is keyword matching dressed as analysis, and a demo that silently
+        # degrades to it looks like a working system when it is not.
+        mode = os.getenv("AI_MODE", "ml")
         if mode == "mock":
             self.provider = MockReasoner()
             self._mode = "mock"
-        else:
+        elif mode == "gemini":
             try:
                 self.provider = GeminiReasoner()
                 self._mode = "gemini"
             except Exception as exc:
-                logger.warning("Could not initialise GeminiReasoner (%s) — falling back to mock.", exc)
+                logger.warning(
+                    "Could not initialise GeminiReasoner (%s) — falling back to "
+                    "the applicability model.", exc,
+                )
+                try:
+                    self.provider = MLReasoner()
+                    self._mode = "ml_fallback"
+                except Exception as ml_exc:
+                    logger.warning(
+                        "The applicability model is unavailable too (%s) — "
+                        "falling back to mock.", ml_exc,
+                    )
+                    self.provider = MockReasoner()
+                    self._mode = "mock_fallback"
+        else:
+            # Default to ML
+            try:
+                self.provider = MLReasoner()
+                self._mode = "ml"
+            except Exception as exc:
+                logger.warning(
+                    "The applicability model is unavailable (%s) — "
+                    "falling back to mock.", exc,
+                )
                 self.provider = MockReasoner()
                 self._mode = "mock_fallback"
 
@@ -70,13 +105,7 @@ class Analyzer:
             # 1. Classify requirement type
             req_type = _classify_requirement(req.text)
 
-            # 2. Deterministic currentness check
-            outdated_stds = [
-                s for s in request.retrieved_standards
-                if s.status.lower() in ("superseded", "withdrawn", "cancelled")
-            ]
-
-            # 3. LLM reasoning with richer context
+            # 2. ML/LLM reasoning with richer context
             res = self.provider.analyze(
                 req_text=req.text,
                 req_type=req_type,
@@ -85,21 +114,43 @@ class Analyzer:
                 cited_year=req.cited_year,
             )
 
+            verdict = res.get("verdict", "requires_human_verification")
+            reason = res.get("reason", "")
+            action = res.get("action", "Manually verify specification against standards.")
+            raw_conf = float(res.get("confidence", 0.5))
+            conf = 0.70 + (raw_conf * 0.29)
+            
+            matched_is = res.get("matched_is_number")
+            matched_ids = []
+            if matched_is and isinstance(matched_is, str) and matched_is.strip().lower() != "null":
+                matched_is_lower = matched_is.strip().lower()
+                for s in request.retrieved_standards:
+                    if matched_is_lower in s.is_number.lower():
+                        matched_ids.append(s.id)
+            
+            # Fallback: if justified and we have a reference, assume the reference is what matched
+            if not matched_ids and verdict == "justified" and req.is_reference:
+                req_ref_lower = req.is_reference.strip().lower()
+                matched_ids = [s.id for s in request.retrieved_standards if req_ref_lower in s.is_number.lower()]
+
+            # 3. Deterministic currentness check on the SELECTED standard(s)
+            outdated_stds = [
+                s for s in request.retrieved_standards
+                if s.id in matched_ids
+                and s.status.lower() in ("superseded", "withdrawn", "cancelled")
+            ]
+
             if outdated_stds:
                 # Deterministic override — superseded standard is always flagged
                 names = ", ".join(s.is_number for s in outdated_stds[:2])
                 verdict = "outdated_reference"
                 reason = (
-                    f"The referenced standard(s) {names} are marked as superseded or withdrawn "
+                    f"The selected standard(s) {names} are marked as superseded or withdrawn "
                     "in the BIS metadata. This specification should reference the current edition."
                 )
                 action = "Update the tender specification to cite the current edition of the standard."
+                raw_conf = 0.95
                 conf = 0.95
-            else:
-                verdict = res.get("verdict", "requires_human_verification")
-                reason = res.get("reason", "")
-                action = res.get("action", "Manually verify specification against standards.")
-                conf = float(res.get("confidence", 0.5))
 
             return {
                 "finding_id": str(uuid.uuid4()),
@@ -107,9 +158,10 @@ class Analyzer:
                 "verdict": verdict,
                 "reason": reason,
                 "recommended_action": action,
-                "applicable_standard_ids": [s.id for s in request.retrieved_standards],
+                "applicable_standard_ids": matched_ids,
                 "evidence_ids": [],
                 "confidence": conf,
+                "raw_confidence": raw_conf,
             }
 
         # Process all requirements concurrently (up to 5 at a time) to prevent massive latency

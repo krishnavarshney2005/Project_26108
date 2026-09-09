@@ -43,10 +43,26 @@ def detect_gaps(standard_record: dict, query_understanding: dict | None = None) 
     gaps = []
 
     is_number = standard_record.get("is_number", "unknown")
-    scope_obj = standard_record.get("scope") or {}
-    scope_text = scope_obj.get("value", "").lower()
-    scope_source = scope_obj.get("source_type", "unverified")
-    is_verified = scope_obj.get("verified", False)
+
+    # `scope` has two shapes in the wild: the full KB stores a provenance dict
+    # {value, source_type, verified}, while the older 50-record dev KB stores a
+    # bare string (or null). Normalise both instead of assuming the dict, which
+    # used to raise AttributeError on the string form and take out the whole
+    # recommendation pipeline. A bare string carries no provenance, so it cannot
+    # be treated as verified -- it falls through to SCOPE_UNCLEAR below.
+    scope_raw = standard_record.get("scope")
+    if isinstance(scope_raw, dict):
+        scope_text = (scope_raw.get("value") or "").lower()
+        scope_source = scope_raw.get("source_type", "unverified")
+        is_verified = bool(scope_raw.get("verified", False))
+    elif isinstance(scope_raw, str):
+        scope_text = scope_raw.lower()
+        scope_source = "unverified"
+        is_verified = False
+    else:
+        scope_text = ""
+        scope_source = "unverified"
+        is_verified = False
 
     # 1. If scope is empty or synthetic, gap detection is unreliable
     if not scope_text or not is_verified:
@@ -62,7 +78,7 @@ def detect_gaps(standard_record: dict, query_understanding: dict | None = None) 
             }
         ]
 
-    search_text = standard_record.get("search_text", "").lower()
+    search_text = (standard_record.get("search_text") or "").lower()
     combined_text = scope_text + " " + search_text
     test_methods = standard_record.get("test_methods") or []
     norm_refs = standard_record.get("normative_references") or []

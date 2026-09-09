@@ -12,6 +12,12 @@ What this module checks:
   3. QCO mandatory flag — does a QCO make BIS certification mandatory?
   4. Transition period  — if superseded, is it still within the allowed window?
   5. Year omitted       — tender cited the IS number without a year (risky)
+  6. Scope/material     — does the standard cover the material specified?
+
+Check 1 is not implemented here. It is delegated to
+`kshiraj/enrichment/version_checker.py`, which every candidate standard now
+passes through — see `_check_version`. Check 6 is delegated to
+`scope_check.py`, which reads the material out of BIS's own titles.
 
 Why deterministic checks matter:
   The LLM analysis step is probabilistic — it reasons over text.
@@ -37,7 +43,18 @@ from shared.models import (
 )
 from shared.utils import get_logger, utcnow
 
+from kartikey.analysis.scope_check import ScopeCheck, check_scope
+from kshiraj.enrichment.version_checker import VersionChecker, VersionCheckResult
+
 logger = get_logger(__name__)
+
+# The single authority on currentness. This module used to decide it inline,
+# which meant two implementations that disagreed in exactly the cases that
+# matter: the inline version called a citation current when the standard's own
+# year was unknown, and called a citation *newer* than the catalogue current
+# too (`cited >= current`). Both are unprovable claims, and the second let a
+# tender citing a nonexistent future edition come back "justified".
+_version_checker = VersionChecker()
 
 
 # ===========================================================================
@@ -46,7 +63,13 @@ logger = get_logger(__name__)
 
 @dataclass
 class VersionCheck:
-    """Result of comparing the year cited in the tender vs the current standard year."""
+    """
+    Result of comparing the year cited in the tender vs the current standard year.
+
+    Mirrors `VersionCheckResult` field-for-field, adding only a procurement-facing
+    `note`. It exists so `ComplianceResult` stays one flat shape; the decision
+    itself comes from VersionChecker.
+    """
     cited_year: int | None
     current_year: int | None
     is_current: bool
@@ -90,6 +113,7 @@ class ComplianceResult:
     version_check: VersionCheck
     status_check: StatusCheck
     qco_check: QCOCheck
+    scope_check: ScopeCheck
 
     suggested_verdict: Verdict
     confidence: float
@@ -124,9 +148,10 @@ def run_compliance_checks(
     version_check = _check_version(requirement, standard)
     status_check = _check_status(standard, today)
     qco_check = _check_qco(standard)
+    scope_check = check_scope(requirement, standard)
 
     suggested_verdict, confidence = _determine_verdict(
-        version_check, status_check, qco_check, requirement, standard,
+        version_check, status_check, qco_check, scope_check, requirement, standard,
     )
 
     evidence = _build_evidence(standard, version_check, status_check, qco_check)
@@ -138,6 +163,7 @@ def run_compliance_checks(
         version_check=version_check,
         status_check=status_check,
         qco_check=qco_check,
+        scope_check=scope_check,
         suggested_verdict=suggested_verdict,
         confidence=confidence,
         evidence=evidence,
@@ -182,47 +208,72 @@ def check_missing_requirement(
 # ===========================================================================
 
 def _check_version(requirement: Requirement, standard: Standard) -> VersionCheck:
-    cited = requirement.cited_year
-    current = standard.year
+    """
+    Compare the cited edition year against the standard's own year.
 
-    if cited is None:
-        return VersionCheck(
-            cited_year=None, current_year=current,
-            is_current=True, is_year_omitted=True, gap_years=None,
-            note=(
-                f"Tender cites '{standard.is_number}' without a year. "
-                "Per BIS convention this implies 'latest edition including amendments', "
-                "but makes compliance verification harder and can cause bid disputes."
-            ),
-        )
-
-    if current is None:
-        return VersionCheck(
-            cited_year=cited, current_year=None,
-            is_current=True, is_year_omitted=False, gap_years=None,
-            note=f"Year {cited} cited. Current edition year not in knowledge base.",
-        )
-
-    gap = current - cited
-    is_current = cited >= current
-
-    if is_current:
-        note = f"Year {cited} matches current edition ({standard.designation}). ✓"
-    elif gap <= 3:
-        note = (
-            f"Year {cited} is {gap} year(s) behind current edition ({standard.designation}). "
-            "Minor gap — check if still within transition period."
-        )
-    else:
-        note = (
-            f"Year {cited} is {gap} year(s) behind current edition ({standard.designation}). "
-            "Significant outdated reference — tender should be updated."
-        )
-
+    The comparison itself is delegated to `VersionChecker`; this function only
+    turns its result into procurement-facing prose. Keeping the decision in one
+    place is the point — the numbers a report shows and the numbers a verdict is
+    derived from must not be able to drift apart.
+    """
+    result = _version_checker.check(requirement, standard)
     return VersionCheck(
-        cited_year=cited, current_year=current,
-        is_current=is_current, is_year_omitted=False,
-        gap_years=gap, note=note,
+        cited_year=result.cited_year,
+        current_year=result.current_year,
+        is_current=result.is_current,
+        is_year_omitted=result.is_year_omitted,
+        gap_years=result.gap_years,
+        note=_version_note(result, standard),
+    )
+
+
+def _version_note(result: VersionCheckResult, standard: Standard) -> str:
+    """
+    Explain a VersionCheckResult in terms a procurement officer can act on.
+
+    VersionChecker's own note states the arithmetic. This adds what it means for
+    the tender: whether the gap is small enough to survive a transition period,
+    and what BIS convention says about an omitted year.
+    """
+    if result.is_year_omitted:
+        return (
+            f"Tender cites '{standard.is_number}' without a year. "
+            "Per BIS convention this implies 'latest edition including amendments', "
+            "but makes compliance verification harder and can cause bid disputes."
+        )
+
+    if result.current_year is None:
+        return (
+            f"Year {result.cited_year} cited, but the current edition year for "
+            f"{standard.is_number} is not in the knowledge base. Currentness "
+            "cannot be established — verify on standardsbis.gov.in."
+        )
+
+    gap = result.gap_years or 0
+
+    if gap == 0:
+        return f"Year {result.cited_year} matches current edition ({standard.designation}). ✓"
+
+    if gap < 0:
+        # Cited edition is newer than anything the knowledge base knows about.
+        # Either the catalogue is stale or the tender cites an edition that does
+        # not exist; both need a human, and neither is "current".
+        return (
+            f"Year {result.cited_year} is {abs(gap)} year(s) *newer* than the "
+            f"latest known edition ({standard.designation}). Either the "
+            "knowledge base is stale or the tender cites an edition that does "
+            "not exist. Not treated as current."
+        )
+
+    if gap <= 3:
+        return (
+            f"Year {result.cited_year} is {gap} year(s) behind current edition "
+            f"({standard.designation}). Minor gap — check if still within transition period."
+        )
+
+    return (
+        f"Year {result.cited_year} is {gap} year(s) behind current edition "
+        f"({standard.designation}). Significant outdated reference — tender should be updated."
     )
 
 
@@ -324,6 +375,7 @@ def _determine_verdict(
     version_check: VersionCheck,
     status_check: StatusCheck,
     qco_check: QCOCheck,
+    scope_check: ScopeCheck,
     requirement: Requirement,
     standard: Standard,
 ) -> tuple[Verdict, float]:
@@ -334,6 +386,27 @@ def _determine_verdict(
     # 1. Withdrawn — hardest fact, highest priority
     if not status_check.is_usable and standard.status == StandardStatus.WITHDRAWN:
         return Verdict.INCORRECT_STANDARD, 0.95
+
+    # 1b. The standard covers a different material than the one specified.
+    #
+    # Above every currentness rule deliberately. All of those answer "is this the
+    # right *edition*", and answering that first means telling an officer to
+    # update the year of a standard that does not apply to their product — advice
+    # that is worse than silence, because it reads as having been checked.
+    # Withdrawal still outranks it: a withdrawn standard cannot be used at all,
+    # whatever it covers.
+    #
+    # WRONG_SCOPE rather than INCORRECT_STANDARD: the standard is real, live and
+    # correctly numbered. What is wrong is the pairing, and WRONG_SCOPE is the
+    # verdict this codebase already defines for "IS exists but covers a different
+    # application" — it also files on the applicability axis rather than
+    # currentness, which is where a material mismatch belongs.
+    #
+    # Confidence 0.80, not higher: the comparison is a fact read out of BIS's own
+    # title, but a title is a summary. A standard can carry an annex the title
+    # never mentions, so this asks for verification rather than asserting error.
+    if scope_check.mismatch:
+        return Verdict.WRONG_SCOPE, 0.80
 
     # 2. Superseded + transition ended
     if (
@@ -355,6 +428,19 @@ def _determine_verdict(
     # 5. Year moderately behind (1-5 years)
     if version_check.gap_years is not None and version_check.gap_years > 0:
         return Verdict.OUTDATED_REFERENCE, 0.70
+
+    # 5b. Tender cites an edition newer than any we know of. Not outdated — the
+    # opposite — but not verifiable either: either our catalogue is behind or the
+    # tender cites an edition that was never published. A bid evaluated against
+    # a nonexistent edition is indefensible, so this must reach a human.
+    if version_check.gap_years is not None and version_check.gap_years < 0:
+        return Verdict.REQUIRES_HUMAN_VERIFICATION, 0.55
+
+    # 5c. A year was cited but we have no year to compare it against, so
+    # currentness is simply unknown. Reporting "justified" here would be
+    # asserting something we never checked.
+    if not version_check.is_year_omitted and version_check.current_year is None:
+        return Verdict.UNABLE_TO_DETERMINE, 0.45
 
     # 6. Under revision — flag for human review
     if standard.status == StandardStatus.UNDER_REVISION:
@@ -388,10 +474,7 @@ def _build_evidence(
         source_name=f"BIS Standard {standard.designation}",
         authority="BIS",
         url=standard.source_url,
-        excerpt=(
-            f"{standard.designation}: {standard.title}. "
-            f"Status: {standard.status.value}. {status_check.note}"
-        ),
+        category="metadata",
         retrieval_date=standard.retrieved_at or now,
     ))
 
@@ -402,7 +485,7 @@ def _build_evidence(
             source_name=f"{standard.designation} Amendment {amd.amendment_number}",
             authority="BIS",
             url=amd.source_url,
-            excerpt=amd.description or f"Amendment {amd.amendment_number} to {standard.designation}.",
+            category="metadata",
             gazette_so_number=amd.gazette_so_number,
             publication_date=amd.effective_date,
             amendment_number=amd.amendment_number,
@@ -416,7 +499,7 @@ def _build_evidence(
             source_name=f"QCO Gazette {qco_check.gazette_so_number}",
             authority=qco_check.issuing_ministry or "Government of India",
             url=None,
-            excerpt=qco_check.note,
+            category="metadata",
             gazette_so_number=qco_check.gazette_so_number,
             publication_date=qco_check.effective_date,
             retrieval_date=now,
