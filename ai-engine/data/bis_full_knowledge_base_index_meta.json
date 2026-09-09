@@ -1,0 +1,13 @@
+{
+  "kb_path": "/Users/kartikeygupta/Desktop/Hackathons/sih_26108/ai-engine/data/bis_full_knowledge_base.json",
+  "kb_sha256": "c82215b34d71b2af603093e775ba96b908f37bb30ba0f44875e53ae2279a779a",
+  "record_count": 1028,
+  "embedding_dim": 384,
+  "faiss_ntotal": 1028,
+  "built_at": "2026-09-03T03:40:09Z",
+  "artifacts": {
+    "embeddings": "/Users/kartikeygupta/Desktop/Hackathons/sih_26108/ai-engine/data/bis_full_knowledge_base_embeddings.npy",
+    "bm25": "/Users/kartikeygupta/Desktop/Hackathons/sih_26108/ai-engine/data/bis_full_knowledge_base_bm25.pkl",
+    "faiss": "/Users/kartikeygupta/Desktop/Hackathons/sih_26108/ai-engine/data/bis_full_knowledge_base_faiss.index"
+  }
+}

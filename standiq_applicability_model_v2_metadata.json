@@ -1,0 +1,49 @@
+{
+    "model_version": "standiq-applicability-v1",
+    "task": "binary_applicability_classification",
+    "selected_model": "Random Forest",
+    "features": [
+        "embedding_cosine_sim",
+        "embedding_cosine_sim_rank",
+        "bm25_score",
+        "bm25_score_rank",
+        "tfidf_cosine_sim",
+        "token_jaccard",
+        "technical_keyword_overlap_ratio",
+        "numeric_param_match_ratio",
+        "numeric_param_count_requirement",
+        "numeric_param_count_standard",
+        "unit_overlap_ratio",
+        "rrf_score",
+        "rrf_rank",
+        "requirement_length_ratio"
+    ],
+    "number_of_features": 14,
+    "threshold": 0.49000000000000027,
+    "cv_f1": 0.7451348141581243,
+    "test_metrics": {
+        "accuracy": 0.8346007604562737,
+        "precision": 0.775,
+        "recall": 0.7085714285714285,
+        "f1": 0.7402985074626866,
+        "roc_auc": 0.8809279609279609,
+        "pr_auc": 0.8353959681614747
+    },
+    "preprocessing": {
+        "imputation": "median",
+        "missing_indicators": true,
+        "scaling": "standard_scaler"
+    },
+    "validation": {
+        "split": "GroupShuffleSplit",
+        "cv": "StratifiedGroupKFold",
+        "n_splits": 3,
+        "group_column": "requirement_id"
+    },
+    "dataset": {
+        "file": "synthetic_requirements_2000_hard.csv",
+        "rows": 2000,
+        "columns": 22,
+        "requirements": 642
+    }
+}

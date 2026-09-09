@@ -330,31 +330,57 @@ async def _step_retrieve(
     retrieved_standards: list[Standard] = []
     seen_ids: set[str] = set()
 
+    # IS-number exact lookup pass
     for req in analysis.requirements:
-        # If the requirement cites a specific IS number, use that as the primary query.
-        # Otherwise, use the raw text. The retrieval service handles both.
+        if not req.is_reference:
+            continue
+        matches = registry.standards_store.get_by_is_number(req.is_reference)
+        for std in matches:
+            if std.id not in seen_ids:
+                seen_ids.add(std.id)
+                # An explicit citation is a perfect match by definition
+                std_copy = std.model_copy()
+                std_copy.relevance_score = 1.0
+                std_copy.semantic_score = 1.0
+                retrieved_standards.append(std_copy)
+
+    # Two-pass: collect all unique semantic candidates first (preserving best score per standard),
+    # then sort globally by score descending before applying the global cap.
+    # This ensures high-scoring standards from later requirements (e.g. IS 10242 at req 5 rank 1,
+    # score=0.86) are not displaced by lower-scoring standards that happened to arrive earlier.
+    semantic_scores: dict[str, float] = {}   # id -> best fused score seen
+    semantic_stds: dict[str, object] = {}    # id -> Standard object
+
+    for req in analysis.requirements:
         query_text = req.is_reference if req.is_reference else req.text
-        
-        # We don't need a huge top_k per requirement because many will hit the same core standards
         query = RetrievalQuery(
             query_text=query_text,
-            top_k=3,
-            include_evidence=False,  # Evidence is fetched separately in enrichment
+            top_k=8,
+            include_evidence=False,
         )
-        
+
         result = registry.retrieval_service.search_standards(query)
-        
+
         for candidate in result.candidates:
-            if candidate.standard.id not in seen_ids:
-                seen_ids.add(candidate.standard.id)
-                retrieved_standards.append(candidate.standard)
+            sid = candidate.standard.id
+            if sid in seen_ids:
+                continue  # already added via exact-match pass; skip
+            score = candidate.score or 0.0
+            if sid not in semantic_scores or score > semantic_scores[sid]:
+                semantic_scores[sid] = score
+                candidate.standard.relevance_score = score
+                semantic_stds[sid] = candidate.standard
+
+    # Sort by best score descending, then extend exact-match list
+    sorted_semantic = sorted(semantic_stds.values(), key=lambda s: semantic_scores[s.id], reverse=True)
+    retrieved_standards.extend(sorted_semantic)
 
     logger.info(
         "_step_retrieve: found %d distinct standards across %d requirements. analysis_id=%s",
         len(retrieved_standards), len(analysis.requirements), analysis.id,
     )
-    
-    return retrieved_standards
+
+    return retrieved_standards[:35]
 
 
 # ===========================================================================
@@ -432,12 +458,90 @@ async def _step_enrich(
 
     from kartikey.orchestration.knowledge_registry import get_registry
     from kartikey.analysis.findings import assemble_findings
+    from shared.models import StandardStatus
 
     registry = get_registry()
 
+    # --- Live BIS Metadata Enrichment ---
+    try:
+        from kshiraj.bis_live_ingestion.adapters.bis_client import BISClient
+        from kshiraj.bis_live_ingestion.sync import BISSyncService
+        
+        bis_client = BISClient()
+        sync_service = BISSyncService(bis_client, registry.standards_store)
+        
+        # 1. Identify Explicitly Cited
+        cited = {req.is_reference for req in analysis.requirements if getattr(req, "is_reference", None)}
+        
+        # 2. Identify Applicable/Final (Defensive parsing of aiml_response)
+        aiml_applicable_ids = set()
+        if aiml_response and hasattr(aiml_response, "findings"):
+            findings_list = getattr(aiml_response, "findings", [])
+            for f in findings_list:
+                if getattr(f, "verdict", "") in ("justified", "applicable", "requires_human_verification"):
+                    std_ids = getattr(f, "applicable_standard_ids", [])
+                    if isinstance(std_ids, list):
+                        aiml_applicable_ids.update(std_ids)
+                        
+        sync_count = 0
+        for std in retrieved_standards:
+            if sync_count >= 3:
+                break
+                
+            needs_sync = False
+            if std.is_number in cited:
+                needs_sync = True
+            elif getattr(std, "id", None) in aiml_applicable_ids:
+                needs_sync = True
+            elif getattr(std, "status", None) == StandardStatus.UNKNOWN:
+                needs_sync = True
+                
+            if needs_sync:
+                # Build exact canonical designation
+                designation = std.is_number
+                if std.part and std.section:
+                    designation += f" ({std.part}/{std.section})"
+                elif std.part:
+                    designation += f" ({std.part})"
+                if std.year:
+                    designation += f":{std.year}"
+                
+                result = sync_service.sync_designation(designation)
+                
+                # Persist evidence
+                if result.evidence:
+                    for ev in result.evidence:
+                        registry.evidence_store.upsert(ev)
+                        
+                sync_count += 1
+                
+        # Refresh retrieved_standards from the store so they reflect the merged data
+        updated_stds = []
+        for std in retrieved_standards:
+            fresh = registry.standards_store.get_by_id(std.id)
+            if fresh:
+                fresh_copy = fresh.model_copy()
+                fresh_copy.relevance_score = std.relevance_score
+                fresh_copy.semantic_score = getattr(std, "semantic_score", None)
+                updated_stds.append(fresh_copy)
+            else:
+                updated_stds.append(std)
+        retrieved_standards = updated_stds
+        
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).warning("Live BIS enrichment failed, continuing with offline catalog: %s", exc)
+    # ------------------------------------
+
     # Pass lookup dicts to the assembler so it can resolve any ID the AI/ML returns
     # to a real object. This enforces the anti-hallucination guardrail.
+    # Build from store first, then overlay retrieved copies — retrieved copies carry
+    # the actual relevance_score from the retrieval pass, which flows through to the
+    # API response and powers the frontend applicability score display.
     standards_lookup = {std.id: std for std in registry.standards_store.list_all()}
+    for std in retrieved_standards:
+        if std.id in standards_lookup and std.relevance_score is not None:
+            standards_lookup[std.id] = std
     # We fetch all evidence here; a production DB would use IN queries.
     evidence_lookup = {ev.id: ev for ev in registry.evidence_store.list_all()}
 
