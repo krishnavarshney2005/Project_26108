@@ -11,7 +11,6 @@ broken `1 - dist/2` approximation.
 
 import logging
 import numpy as np
-from sentence_transformers import SentenceTransformer
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +21,7 @@ _model = None
 def _get_model():
     global _model
     if _model is None:
+        from sentence_transformers import SentenceTransformer  # deferred: avoids loading torch at import time
         logger.info("Loading SentenceTransformer model '%s'...", _MODEL_NAME)
         _model = SentenceTransformer(_MODEL_NAME)
     return _model

@@ -66,15 +66,34 @@ async def lifespan(app: FastAPI):
     global analyzer, recommender, startup_status
     logger.info("Lifespan starting — Initialising Analyzer…")
     analyzer = Analyzer()
-    
-    # Start recommender in a background thread so FastAPI can bind to the port
-    # and answer /health checks immediately.
-    startup_status = "starting"
-    thread = threading.Thread(target=load_recommender, daemon=True)
-    thread.start()
-    
+
+    if os.getenv("SKIP_RECOMMENDER", "").lower() == "true":
+        # Combined-service mode: /recommend is unused; skip the 300+ MB Recommender
+        # (FAISS index + BM25 + numpy embeddings) so the combined backend+ai-engine
+        # process fits within Render Free 512 MB.
+        # We still need the applicability ML model loaded for MLReasoner to work.
+        logger.info("SKIP_RECOMMENDER=true — loading applicability model directly (no Recommender).")
+        try:
+            import os as _os
+            from src.ml.applicability_model import load_applicability_model
+            _root = _os.path.abspath(_os.path.join(_os.path.dirname(__file__), "..", ".."))
+            load_applicability_model(
+                model_path=_os.path.join(_root, "standiq_applicability_model_v2.joblib"),
+                metadata_path=_os.path.join(_root, "standiq_applicability_model_v2_metadata.json"),
+            )
+            logger.info("Applicability model loaded (SKIP_RECOMMENDER path).")
+        except Exception as exc:
+            logger.error("Failed to load applicability model in SKIP_RECOMMENDER mode: %s", exc)
+        startup_status = "ok"
+    else:
+        # Start recommender in a background thread so FastAPI can bind to the port
+        # and answer /health checks immediately.
+        startup_status = "starting"
+        thread = threading.Thread(target=load_recommender, daemon=True)
+        thread.start()
+
     yield
-    
+
     logger.info("Lifespan shutting down.")
 
 app = FastAPI(
