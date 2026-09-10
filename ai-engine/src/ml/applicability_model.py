@@ -48,6 +48,16 @@ def load_applicability_model(
     global _instance
     try:
         _instance = ApplicabilityModel(model_path, metadata_path)
+
+        # Prevent thread explosion on small containers by forcing single-threaded execution for inference
+        try:
+            classifier = _instance.pipeline.named_steps.get("model")
+            if classifier and hasattr(classifier, "n_jobs"):
+                classifier.n_jobs = 1
+                logger.info("Set RandomForestClassifier n_jobs=1 for inference.")
+        except Exception as override_exc:
+            logger.warning("Could not override n_jobs on loaded model: %s", override_exc)
+
         logger.info(
             "Applicability model loaded (version=%s) from %s",
             _instance.model_version,
@@ -141,18 +151,18 @@ class ApplicabilityModel:
     # ------------------------------------------------------------------
     # Inference
     # ------------------------------------------------------------------
-    def predict(self, features_df: pd.DataFrame) -> dict:
+    def predict(self, features_df: pd.DataFrame) -> dict | list[dict]:
         """
-        Run inference on a single-row feature DataFrame.
+        Run inference on a single-row or multi-row feature DataFrame.
 
         Parameters
         ----------
         features_df : pd.DataFrame
-            Shape (1, 14) produced by build_applicability_features().
+            Shape (N, 14) produced by build_applicability_features().
 
         Returns
         -------
-        dict with keys:
+        dict or list[dict] with keys:
             applicability_score       float in [0, 1]  (P(APPLICABLE))
             applicability_class       "APPLICABLE" | "NOT_APPLICABLE"
             model_version             str
@@ -161,31 +171,38 @@ class ApplicabilityModel:
         On any exception the dict contains applicability_class = "UNAVAILABLE"
         and applicability_score = None.
         """
+        is_single = len(features_df) == 1
         try:
-            # Feature coverage: fraction of columns that have at least one non-NaN value
-            nan_count = int(features_df.isna().any(axis=0).sum())
-            feature_coverage = round((self.N_FEATURES - nan_count) / self.N_FEATURES, 3)
+            probas = self.pipeline.predict_proba(features_df)  # shape (N, 2)
+            results = []
 
-            proba = self.pipeline.predict_proba(features_df)[0]  # shape (2,)
-            applicability_score = round(float(proba[1]), 4)
-            applicability_class = (
-                "APPLICABLE" if applicability_score >= 0.5 else "NOT_APPLICABLE"
-            )
+            for i in range(len(features_df)):
+                # Feature coverage: fraction of columns that have at least one non-NaN value for this row
+                row_na = features_df.iloc[i].isna().sum()
+                feature_coverage = round((self.N_FEATURES - int(row_na)) / self.N_FEATURES, 3)
 
-            return {
-                "applicability_score": applicability_score,
-                "applicability_class": applicability_class,
-                "model_version": self.model_version,
-                "feature_coverage": feature_coverage,
-            }
+                applicability_score = round(float(probas[i][1]), 4)
+                applicability_class = (
+                    "APPLICABLE" if applicability_score >= 0.5 else "NOT_APPLICABLE"
+                )
+
+                results.append({
+                    "applicability_score": applicability_score,
+                    "applicability_class": applicability_class,
+                    "model_version": self.model_version,
+                    "feature_coverage": feature_coverage,
+                })
+
+            return results[0] if is_single else results
 
         except Exception as exc:
             logger.error(
                 "ApplicabilityModel.predict() failed: %s -- returning UNAVAILABLE.", exc
             )
-            return {
+            fallback = {
                 "applicability_score": None,
                 "applicability_class": "UNAVAILABLE",
                 "model_version": self.model_version,
-                "feature_coverage": None,
+                "feature_coverage": 0.0,
             }
+            return fallback if is_single else [fallback] * len(features_df)

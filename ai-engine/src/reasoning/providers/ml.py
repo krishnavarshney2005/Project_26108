@@ -52,6 +52,9 @@ class MLReasoner(ReasoningProvider):
 
         all_candidates = [candidate for _, candidate in candidate_pairs]
 
+        features_list = []
+        valid_candidates = []
+
         for std, candidate_dict in candidate_pairs:
             # The model must see the full candidate universe here. Passing
             # [candidate_dict] makes every candidate rank 1 and destroys the
@@ -62,29 +65,41 @@ class MLReasoner(ReasoningProvider):
                     candidate=candidate_dict,
                     all_candidates=all_candidates,
                 )
+                features_list.append(features_df)
+                valid_candidates.append(std)
 
                 logger.debug(
                     "ML features for %s: %s",
                     getattr(std, "is_number", ""),
                     features_df.to_dict(orient="records"),
                 )
-                pred = model.predict(features_df)
-                logger.debug(
-                    "ML prediction for %s: %s",
-                    getattr(std, "is_number", ""),
-                    pred,
-                )
-
-                score = pred.get("applicability_score")
-                if score is not None and score > best_score:
-                    best_score = score
-                    best_std = std
             except Exception as exc:
                 logger.warning(
                     "ML feature extraction failed for standard %s: %s",
                     getattr(std, "is_number", ""),
                     exc,
                 )
+
+        if features_list:
+            import pandas as pd
+            batch_df = pd.concat(features_list, ignore_index=True)
+            try:
+                preds = model.predict(batch_df)
+                if isinstance(preds, dict):
+                    preds = [preds]
+
+                for std, pred in zip(valid_candidates, preds):
+                    logger.debug(
+                        "ML prediction for %s: %s",
+                        getattr(std, "is_number", ""),
+                        pred,
+                    )
+                    score = pred.get("applicability_score")
+                    if score is not None and score > best_score:
+                        best_score = score
+                        best_std = std
+            except Exception as exc:
+                logger.warning("Batch ML prediction failed: %s", exc)
                 
         if best_std and best_score >= 0.5:
             return {
