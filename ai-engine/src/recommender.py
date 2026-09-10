@@ -113,6 +113,11 @@ class Recommender:
         # from scratch. Re-uses the cached embeddings .npy when the KB is
         # unchanged, otherwise re-embeds (needs the ST model resident in RAM).
         # ------------------------------------------------------------------
+        is_render = os.getenv("RENDER") == "true" or os.getenv("ENVIRONMENT") == "production"
+        if is_render:
+            logger.error("Render deployment MUST use pre-built artifacts. Fallback disabled.")
+            raise RuntimeError("Render deployment MUST use pre-built artifacts. Fallback disabled to prevent OOM.")
+            
         try:
             cache_path = self.data_path.replace(".json", "_embeddings.npy")
             kb_mtime = os.path.getmtime(self.data_path)
@@ -156,16 +161,29 @@ class Recommender:
 
         Returns True if the retriever was loaded and wired up; False to tell
         the caller to fall back to building indexes from scratch.
-
-        Why validate: the FAISS/BM25 indices are *positional* — retrieved
-        index i maps to self.standards[i]. If the KB on disk has drifted from
-        the one the artifacts were built against, that mapping is silently
-        wrong. We compare a content hash (kb_sha256 from the meta) rather than
-        mtime, because a fresh `git clone` on Render resets file mtimes
-        unpredictably — an mtime check would reject valid artifacts and defeat
-        the whole point of this fast path.
         """
-        import faiss
+        is_render = os.getenv("RENDER") == "true" or os.getenv("ENVIRONMENT") == "production"
+
+        def fail(msg: str, exc: Exception = None):
+            if is_render:
+                logger.error(f"PREBUILT INDEX FATAL ERROR (RENDER): {msg}")
+                if exc:
+                    raise RuntimeError(f"Render prebuilt index failure: {msg}") from exc
+                else:
+                    raise RuntimeError(f"Render prebuilt index failure: {msg}")
+            else:
+                if exc:
+                    logger.warning(f"Local prebuilt index bypass: {msg} - {exc}")
+                else:
+                    logger.warning(f"Local prebuilt index bypass: {msg}")
+                return False
+
+        try:
+            import faiss
+            logger.info("Diagnostic (c): FAISS import SUCCESS")
+        except Exception as e:
+            return fail("FAISS import failed", e)
+
         import joblib
 
         base      = os.path.splitext(self.data_path)[0]
@@ -174,26 +192,20 @@ class Recommender:
         meta_path = f"{base}_index_meta.json"
 
         if not (os.path.exists(bm25_path) and os.path.exists(idx_path)):
-            logger.info("No pre-built retrieval artifacts on disk — building from scratch.")
-            return False
+            return fail("Pre-built artifacts missing from disk")
 
-        # --- Validate against build metadata (protects the positional map) ---
+        # --- a. metadata read ---
         if os.path.exists(meta_path):
             try:
                 with open(meta_path, "r", encoding="utf-8") as f:
                     meta = json.load(f)
+                logger.info("Diagnostic (a): metadata read SUCCESS")
             except Exception as exc:
-                logger.warning("Unreadable index metadata %s: %s — rebuilding.", meta_path, exc)
-                return False
+                return fail(f"Unreadable index metadata {meta_path}", exc)
 
             rc = meta.get("record_count")
-            if rc is not None and rc != len(self.standards):
-                logger.warning(
-                    "Artifact record_count=%s != KB size=%d — rebuilding.",
-                    rc, len(self.standards),
-                )
-                return False
-
+            
+            # --- b. knowledge-base SHA256 validation ---
             expected_sha = meta.get("kb_sha256")
             if expected_sha:
                 import hashlib
@@ -201,34 +213,37 @@ class Recommender:
                 with open(self.data_path, "rb") as fh:
                     for chunk in iter(lambda: fh.read(65536), b""):
                         h.update(chunk)
-                if h.hexdigest() != expected_sha:
-                    logger.warning(
-                        "KB checksum changed since artifacts were built — rebuilding to stay correct."
-                    )
-                    return False
+                actual_sha = h.hexdigest()
+                if actual_sha != expected_sha:
+                    return fail(f"KB checksum changed. Expected: {expected_sha}, Actual: {actual_sha}")
+                logger.info("Diagnostic (b): knowledge-base SHA256 validation SUCCESS")
 
         try:
-            # BM25 — a fully fitted BM25Retriever, pickled by joblib.
-            bm25 = joblib.load(bm25_path)
+            # --- e. BM25/joblib load ---
+            try:
+                bm25 = joblib.load(bm25_path)
+                logger.info("Diagnostic (e): BM25/joblib load SUCCESS")
+            except Exception as e:
+                return fail("BM25 joblib load failed", e)
+
+            # --- f. document/index count validation (BM25) ---
             if getattr(bm25, "n_docs", None) != len(self.standards):
-                logger.warning(
-                    "BM25 pickle has %s docs but KB has %d — rebuilding.",
-                    getattr(bm25, "n_docs", "?"), len(self.standards),
-                )
-                return False
+                return fail(f"BM25 pickle has {getattr(bm25, 'n_docs', '?')} docs but KB has {len(self.standards)}")
 
-            # FAISS — IndexFlatIP with the corpus vectors already added.
-            index = faiss.read_index(idx_path)
+            # --- d. FAISS index load ---
+            try:
+                index = faiss.read_index(idx_path)
+                logger.info("Diagnostic (d): FAISS index load SUCCESS")
+            except Exception as e:
+                return fail("FAISS index load failed", e)
+
+            # --- f. document/index count validation (FAISS) ---
             if index.ntotal != len(self.standards):
-                logger.warning(
-                    "FAISS index has %d vectors but KB has %d — rebuilding.",
-                    index.ntotal, len(self.standards),
-                )
-                return False
+                return fail(f"FAISS index has {index.ntotal} vectors but KB has {len(self.standards)}")
+            
+            logger.info("Diagnostic (f): document/index count validation SUCCESS")
 
-            # Wire the loaded components into a HybridRetriever WITHOUT calling
-            # .fit() — no BM25 rebuild, no FAISS re-add, no embedding model
-            # touched. fit() only ever sets these three attributes.
+            # --- g. final prebuilt retriever initialization ---
             retriever = HybridRetriever()
             retriever.standards = self.standards
             retriever.bm25 = bm25
@@ -238,16 +253,14 @@ class Recommender:
             self.retriever = retriever
 
             logger.info(
-                "Loaded pre-built artifacts: BM25=%s (%d docs), FAISS=%s (%d vectors, dim=%d).",
+                "Diagnostic (g): final prebuilt retriever initialization SUCCESS. Loaded: BM25=%s (%d docs), FAISS=%s (%d vectors, dim=%d).",
                 os.path.basename(bm25_path), bm25.n_docs,
                 os.path.basename(idx_path), index.ntotal, index.d,
             )
             return True
 
         except Exception as exc:
-            logger.warning("Failed to load pre-built artifacts (%s) — rebuilding.", exc)
-            self.retriever = None
-            return False
+            return fail("Unexpected failure during prebuilt artifact loading", exc)
 
     def _select_top_k(self, ranked_results: list, query: str, top_k: int) -> list:
         """
