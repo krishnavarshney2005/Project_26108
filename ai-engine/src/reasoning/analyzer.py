@@ -121,8 +121,9 @@ class Analyzer:
             conf = 0.70 + (raw_conf * 0.29)
             
             matched_is = res.get("matched_is_number")
-            matched_ids = []
-            if matched_is and isinstance(matched_is, str) and matched_is.strip().lower() != "null":
+            matched_ids = res.get("applicable_standard_ids", [])
+            
+            if not matched_ids and matched_is and isinstance(matched_is, str) and matched_is.strip().lower() != "null":
                 matched_is_lower = matched_is.strip().lower()
                 for s in request.retrieved_standards:
                     if matched_is_lower in s.is_number.lower():

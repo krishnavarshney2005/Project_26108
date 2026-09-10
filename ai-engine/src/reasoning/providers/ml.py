@@ -107,7 +107,8 @@ class MLReasoner(ReasoningProvider):
                 "reason": f"The ML applicability model (v2) matched this requirement to {best_std.is_number} with a probability of {best_score:.2f}.",
                 "action": "Requirement verified against applicable standard.",
                 "confidence": best_score,
-                "matched_is_number": best_std.is_number
+                "matched_is_number": best_std.is_number,
+                "applicable_standard_ids": [best_std.id] if hasattr(best_std, "id") else [best_std.get("id")] if isinstance(best_std, dict) else []
             }
         elif best_std:
             return {
@@ -115,7 +116,8 @@ class MLReasoner(ReasoningProvider):
                 "reason": f"The ML applicability model (v2) could not confidently match this requirement (best match {best_std.is_number} at {best_score:.2f}).",
                 "action": "Manually verify specification.",
                 "confidence": max(0.1, best_score),
-                "matched_is_number": None
+                "matched_is_number": None,
+                "applicable_standard_ids": []
             }
         else:
             return {
@@ -123,5 +125,6 @@ class MLReasoner(ReasoningProvider):
                 "reason": "The ML applicability model failed to score the candidates.",
                 "action": "Manually verify specification.",
                 "confidence": 0.0,
-                "matched_is_number": None
+                "matched_is_number": None,
+                "applicable_standard_ids": []
             }
