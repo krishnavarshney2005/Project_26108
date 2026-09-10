@@ -13,7 +13,7 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")" && pwd)"
-AI_PORT=10000
+AI_PORT=10001
 HEALTH_URL="http://127.0.0.1:${AI_PORT}/health"
 
 echo "[start.sh] Repo root: ${REPO_ROOT}"
@@ -22,7 +22,7 @@ echo "[start.sh] Starting AI Engine on localhost:${AI_PORT} (SKIP_RECOMMENDER=tr
 SKIP_RECOMMENDER=true \
 AI_MODE=ml \
 PYTHONPATH="${REPO_ROOT}/ai-engine" \
-  python -m uvicorn api.main:app \
+  python3 -m uvicorn api.main:app \
     --app-dir "${REPO_ROOT}/ai-engine" \
     --host 127.0.0.1 \
     --port "${AI_PORT}" \
@@ -36,7 +36,7 @@ echo "[start.sh] AI Engine PID: ${AI_PID}"
 echo "[start.sh] Waiting for AI Engine to become ready..."
 READY=0
 for i in $(seq 1 90); do
-  STATUS=$(curl -sf "${HEALTH_URL}" 2>/dev/null | python -c "import sys,json; d=json.load(sys.stdin); print(d.get('status',''))" 2>/dev/null || true)
+  STATUS=$(curl -sf "${HEALTH_URL}" 2>/dev/null | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('status',''))" 2>/dev/null || true)
   if [ "${STATUS}" = "ok" ]; then
     READY=1
     echo "[start.sh] AI Engine ready after ${i}s (status=ok)."
@@ -55,7 +55,7 @@ echo "[start.sh] Starting Backend on 0.0.0.0:${PORT}..."
 
 AIML_SERVICE_URL="http://127.0.0.1:${AI_PORT}/analyze" \
 PYTHONPATH="${REPO_ROOT}/backend" \
-  python -m uvicorn kartikey.api.main:app \
+  python3 -m uvicorn kartikey.api.main:app \
     --app-dir "${REPO_ROOT}/backend" \
     --host 0.0.0.0 \
     --port "${PORT}" \
