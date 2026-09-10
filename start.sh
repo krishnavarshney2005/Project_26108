@@ -52,12 +52,13 @@ if [ "${READY}" -eq 0 ]; then
 fi
 
 echo "[start.sh] Starting Backend on 0.0.0.0:${PORT}..."
+echo "[start.sh] Python: $(python3 --version 2>&1)"
+echo "[start.sh] Uvicorn: $(python3 -m uvicorn --version 2>&1 || echo 'NOT FOUND')"
 
 AIML_SERVICE_URL="http://127.0.0.1:${AI_PORT}/analyze" \
 SEMANTIC_RETRIEVAL_ENABLED=false \
 PYTHONPATH="${REPO_ROOT}/backend" \
   python3 -m uvicorn kartikey.api.main:app \
-    --app-dir "${REPO_ROOT}/backend" \
     --host 0.0.0.0 \
     --port "${PORT}" \
     --workers 1 \
