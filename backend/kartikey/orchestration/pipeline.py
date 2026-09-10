@@ -506,7 +506,10 @@ async def _step_enrich(
                 if std.year:
                     designation += f":{std.year}"
                 
-                result = sync_service.sync_designation(designation)
+                result = await asyncio.to_thread(
+                        sync_service.sync_designation,
+                        designation,
+                    )
                 
                 # Persist evidence
                 if result.evidence:
