@@ -273,7 +273,6 @@ export function NewAnalysisPage() {
     const name = picked[0].name.toLowerCase();
     if (name.includes('hindi')) {
        setDemoFixture('hindi');
-       setAnalysisTitle('व्यापक एएमसी / Comprehensive AMC for 168 ACs at BRIC-NIBMG');
     } else if (name.includes('tamil')) {
        setDemoFixture('tamil');
     }
@@ -387,22 +386,10 @@ export function NewAnalysisPage() {
     setExtractionProgress(1);
     setSubmitError(null);
 
-    // The Tamil and Hindi fixtures are presentation-only: they showcase the
-    // multilingual UI, and the deterministic extractor reads English clause
-    // structure, so there is nothing real for it to return on them. The bundled
-    // LED tender is deliberately NOT in here — it is the demo everyone watches,
-    // it is real English tender text, and it must go down the same live path as
-    // any uploaded document. It used to short-circuit to a hardcoded profile
-    // behind 8.5 s of fake progress, which is precisely why the app looked like
-    // it was not using its own backend.
-    if (demoFixture === 'tamil' || demoFixture === 'hindi') {
-      setProfile((demoFixture === 'tamil' ? TAMIL_PROFILE : HINDI_PROFILE) as ProcurementProfile);
-      setTimeout(() => setExtractionProgress(2), 700);
-      setTimeout(() => setExtractionProgress(3), 1400);
-      setTimeout(() => setExtractionProgress(4), 2000);
-      setTimeout(() => setStep('profile'), 2400);
-      return;
-    }
+    // Note: Hindi and Tamil fixtures (an-hindi / an-tamil) only kick in AFTER
+    // the user confirms — see handleConfirmAndAnalyze. The profile preview step
+    // always runs live so the officer sees what was actually extracted from their
+    // document, including any IS references in the Hindi/bilingual text.
 
     // Live extraction path — every real input, including the bundled sample.
     try {

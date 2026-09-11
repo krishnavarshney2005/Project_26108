@@ -21,9 +21,11 @@ import {
   History,
   Info,
   Layers,
+  Link,
   Maximize2,
   Minus,
   Plus,
+  Quote,
   RefreshCw,
   Replace,
   RotateCcw,
@@ -81,6 +83,20 @@ interface GraphNode {
   role: StandardRelationshipRole | 'equivalent' | 'supersedes';
 }
 
+// ─── Requirement chips for LED demo relationships ────────────────────────────
+// Maps relationship IDs to requirement labels that are directly tied to that
+// relationship, sourced strictly from the existing mockData requirements.
+const REL_REQUIREMENT_CHIPS: Record<string, string[]> = {
+  'rel-001': ['Thermal Auto-Cutoff', '440V Withstand', 'CRS Certification'],
+  'rel-002': ['Efficacy ≥135 lm/W', 'CCT 4000K–5000K', 'CRI Ra ≥ 70', 'L70 >50,000h'],
+  'rel-003': ['IP66 Enclosure', 'NABL Test Certificate', 'Die-Cast Aluminum'],
+  'rel-004': ['THD < 10%', 'Power Factor', 'Grid Compatibility'],
+  'rel-005': ['Obsolete Citation Alert', 'Corrigendum Required'],
+  'rel-006': ['Avg 25 Lux on Road', 'M1–M5 Road Class', 'U0 ≥ 0.40'],
+  'rel-007': ['International OEM Certs', 'IEC Test Acceptance'],
+  'rel-008': ['Historical Traceability'],
+};
+
 export function AnalysisRelationshipsTab({ analysis, analysisId, isReal = false }: Props) {
   const { navigate } = useRouter();
   const sourceAnalysisId = analysis?.id || analysisId;
@@ -104,26 +120,21 @@ export function AnalysisRelationshipsTab({ analysis, analysisId, isReal = false 
     }));
   }
 
-
-
   const [activeFilter, setActiveFilter] = useState<FilterType>('all');
   const [zoomLevel, setZoomLevel] = useState<number>(1);
   const [panOffset, setPanOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [isCompareModalOpen, setIsCompareModalOpen] = useState<boolean>(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
-
   const relsForNodes = useMemo(() => {
     if (activeFilter === 'all' || activeFilter === 'primary') return rels;
     return rels.filter(r => r.role === activeFilter);
   }, [rels, activeFilter]);
 
-
   // Active selected node in inspector
   const [selectedNodeId, setSelectedNodeId] = useState<string>(primaryStd.id);
 
   // Graph nodes configuration
-  // Width: 840, Height: 520. Center: (420, 260)
   const graphNodes: GraphNode[] = useMemo(() => {
     const nodes: GraphNode[] = [
       {
@@ -156,7 +167,6 @@ export function AnalysisRelationshipsTab({ analysis, analysisId, isReal = false 
 
     return nodes;
   }, [primaryStd, relsForNodes]);
-
 
   // Selected standard details
   const selectedNode = graphNodes.find((n) => n.id === selectedNodeId) || graphNodes[0];
@@ -222,6 +232,8 @@ export function AnalysisRelationshipsTab({ analysis, analysisId, isReal = false 
           border: 'border-teal-300',
           dot: 'bg-teal-600',
           label: 'Primary Applicable Standard',
+          arrow: 'text-teal-600',
+          arrowBg: 'bg-teal-50 border-teal-200',
         };
 
       case 'safety':
@@ -235,6 +247,8 @@ export function AnalysisRelationshipsTab({ analysis, analysisId, isReal = false 
           border: 'border-amber-300',
           dot: 'bg-amber-500',
           label: 'Safety Standard',
+          arrow: 'text-amber-600',
+          arrowBg: 'bg-amber-50 border-amber-200',
         };
       case 'normative':
         return {
@@ -247,6 +261,8 @@ export function AnalysisRelationshipsTab({ analysis, analysisId, isReal = false 
           border: 'border-blue-300',
           dot: 'bg-blue-600',
           label: 'Normative Reference',
+          arrow: 'text-blue-600',
+          arrowBg: 'bg-blue-50 border-blue-200',
         };
       case 'testing':
         return {
@@ -259,6 +275,8 @@ export function AnalysisRelationshipsTab({ analysis, analysisId, isReal = false 
           border: 'border-purple-300',
           dot: 'bg-purple-600',
           label: 'Testing Protocol',
+          arrow: 'text-purple-600',
+          arrowBg: 'bg-purple-50 border-purple-200',
         };
       case 'installation':
         return {
@@ -271,6 +289,8 @@ export function AnalysisRelationshipsTab({ analysis, analysisId, isReal = false 
           border: 'border-emerald-300',
           dot: 'bg-emerald-600',
           label: 'Design & Installation',
+          arrow: 'text-emerald-600',
+          arrowBg: 'bg-emerald-50 border-emerald-200',
         };
       case 'equivalent':
         return {
@@ -283,6 +303,8 @@ export function AnalysisRelationshipsTab({ analysis, analysisId, isReal = false 
           border: 'border-sky-300',
           dot: 'bg-sky-600',
           label: 'International Equivalent',
+          arrow: 'text-sky-600',
+          arrowBg: 'bg-sky-50 border-sky-200',
         };
       case 'supersedes':
         return {
@@ -295,6 +317,8 @@ export function AnalysisRelationshipsTab({ analysis, analysisId, isReal = false 
           border: 'border-error-300',
           dot: 'bg-error-500',
           label: 'Superseded / Withdrawn',
+          arrow: 'text-error-600',
+          arrowBg: 'bg-error-50 border-error-200',
         };
       default:
         return {
@@ -307,12 +331,13 @@ export function AnalysisRelationshipsTab({ analysis, analysisId, isReal = false 
           border: 'border-ink-200',
           dot: 'bg-ink-500',
           label: 'Related Standard',
+          arrow: 'text-ink-500',
+          arrowBg: 'bg-ink-50 border-ink-200',
         };
     }
   };
 
   // ─── RELATIONSHIPS VIEW (FOR ALL ANALYSES) ─────────────────────────────────
-  // Rich relationship card view dynamically driven by relationship data.
   const countByRole = (role: string) => rels.filter((r) => r.role === role).length;
 
   const roleSummary: Array<{ role: string; label: string; count: number }> = [
@@ -331,9 +356,9 @@ export function AnalysisRelationshipsTab({ analysis, analysisId, isReal = false 
           <div className="flex items-center gap-2 border-b border-ink-100 pb-3 mb-4">
             <GitBranch size={16} className="text-teal-700" />
             <div>
-              <h3 className="text-sm font-semibold text-ink-900">Standard References &amp; Relationships</h3>
+              <h3 className="text-sm font-semibold text-ink-900">Standard References & Relationships</h3>
               <p className="text-xs text-ink-500 mt-0.5">
-                Normative references cited by the matched standards for this procurement.
+                How applicable standards connect, support, and complement each other for this procurement.
               </p>
             </div>
           </div>
@@ -350,6 +375,197 @@ export function AnalysisRelationshipsTab({ analysis, analysisId, isReal = false 
     );
   }
 
+  // ── Is this the LED demo? ─────────────────────────────────────────────────
+  const isLedDemo = sourceAnalysisId === 'an-001';
+
+  if (isLedDemo) {
+    // ── LED DEMO: Rich intelligence card layout ──────────────────────────────
+    return (
+      <div className="space-y-6">
+        {/* Header */}
+        <div className="flex items-start gap-3">
+          <div className="flex-1">
+            <div className="flex items-center gap-2 mb-1">
+              <GitBranch size={15} className="text-teal-700" />
+              <h3 className="text-sm font-semibold text-ink-900">Standards Intelligence — Relationship Map</h3>
+            </div>
+            <p className="text-xs text-ink-500 leading-relaxed">
+              How applicable standards connect, support, and complement each other for this procurement.
+            </p>
+          </div>
+        </div>
+
+        {/* Summary strip */}
+        <div className="rounded-xl border border-ink-100 bg-ink-50/40 px-4 py-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs font-bold text-ink-700 font-mono mr-1">
+              {rels.length} Standard Relationships
+            </span>
+            <span className="text-ink-300 text-xs">·</span>
+            {roleSummary.map(({ role, label, count }) => {
+              const theme = getRoleTheme(role);
+              return (
+                <span
+                  key={role}
+                  className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-[11px] font-semibold font-mono ${theme.badgeBg} ${theme.badgeText} border-current/30`}
+                >
+                  <span className={`h-1.5 w-1.5 rounded-full ${theme.dot}`} />
+                  {count} {label}
+                </span>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Relationship cards */}
+        <div className="grid grid-cols-1 gap-5">
+          {rels.map((rel) => {
+            const theme = getRoleTheme(rel.role || 'normative');
+            const fromStd = localGetStandardById(rel.fromStandardId);
+            const toStd   = localGetStandardById(rel.toStandardId);
+            const chips = REL_REQUIREMENT_CHIPS[rel.id] || [];
+
+            return (
+              <div
+                key={rel.id}
+                className="rounded-xl border border-ink-200 bg-white shadow-soft hover:shadow-md transition-shadow overflow-hidden"
+              >
+                {/* Coloured top bar */}
+                <div className="h-1" style={{ backgroundColor: theme.stroke }} />
+
+                <div className="p-5">
+                  {/* ── Card header: role badge + relationship label ── */}
+                  <div className="flex flex-wrap items-center gap-2 mb-4">
+                    <span
+                      className={`inline-block rounded px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest font-mono ${theme.badgeBg} ${theme.badgeText}`}
+                    >
+                      {theme.label}
+                    </span>
+                    <span className="text-xs font-semibold text-ink-700">{rel.label}</span>
+                    {rel.clause && (
+                      <span className="text-[11px] font-mono text-ink-400 ml-auto">{rel.clause}</span>
+                    )}
+                  </div>
+
+                  {/* ── SOURCE → RELATIONSHIP → TARGET visual ── */}
+                  <div className="flex items-stretch gap-3 mb-5">
+                    {/* Source standard box */}
+                    <button
+                      onClick={() => fromStd && navigate({ name: 'standard', standardId: fromStd.id })}
+                      className={`flex-1 min-w-0 rounded-lg border-2 p-3 text-left transition-colors ${
+                        fromStd ? 'hover:border-teal-400 cursor-pointer' : 'cursor-default'
+                      } border-ink-200 bg-ink-50/50`}
+                    >
+                      <div className="text-[10px] font-bold uppercase tracking-widest font-mono text-ink-400 mb-1">Source</div>
+                      <div className="font-mono font-bold text-sm text-ink-900 leading-tight">
+                        {fromStd?.number ?? rel.fromStandardId}
+                      </div>
+                      {fromStd?.title && (
+                        <div className="text-xs text-ink-500 mt-0.5 line-clamp-2 leading-tight">{fromStd.title}</div>
+                      )}
+                    </button>
+
+                    {/* Arrow + relationship label */}
+                    <div className="flex flex-col items-center justify-center gap-1.5 shrink-0">
+                      <div className={`rounded-full border px-2.5 py-1 text-[10px] font-bold font-mono uppercase tracking-wider text-center max-w-[80px] ${theme.arrowBg} ${theme.badgeText}`}>
+                        {theme.label.split(' ')[0]}
+                      </div>
+                      <ArrowRight size={18} className={theme.arrow} />
+                    </div>
+
+                    {/* Target standard box */}
+                    <button
+                      onClick={() => toStd && navigate({ name: 'standard', standardId: toStd.id })}
+                      className={`flex-1 min-w-0 rounded-lg border-2 p-3 text-left transition-colors ${
+                        toStd ? 'hover:border-teal-400 cursor-pointer' : 'cursor-default'
+                      } border-ink-200 bg-ink-50/50`}
+                    >
+                      <div className="text-[10px] font-bold uppercase tracking-widest font-mono text-ink-400 mb-1">Target</div>
+                      <div className="font-mono font-bold text-sm text-ink-900 leading-tight">
+                        {toStd?.number ?? rel.toStandardId}
+                      </div>
+                      {toStd?.title && (
+                        <div className="text-xs text-ink-500 mt-0.5 line-clamp-2 leading-tight">{toStd.title}</div>
+                      )}
+                    </button>
+                  </div>
+
+                  {/* ── Content: Why + Impact + Evidence ── */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {/* Left: Description + Procurement Impact */}
+                    <div className="space-y-3">
+                      <div>
+                        <h5 className="text-[11px] font-bold uppercase tracking-wider text-ink-500 font-mono mb-1.5 flex items-center gap-1.5">
+                          <Link size={11} />
+                          Why They Are Related
+                        </h5>
+                        <p className="text-xs text-ink-700 leading-relaxed">{rel.description}</p>
+                      </div>
+
+                      {rel.whyMatters && (
+                        <div>
+                          <h5 className="text-[11px] font-bold uppercase tracking-wider text-teal-600 font-mono mb-1.5">
+                            Procurement Impact
+                          </h5>
+                          <p className="text-xs text-teal-900 leading-relaxed bg-teal-50/60 border border-teal-100 rounded-lg p-2.5">
+                            {rel.whyMatters}
+                          </p>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Right: Evidence */}
+                    {rel.evidenceSnippet && (
+                      <div className="md:border-l md:border-ink-100 md:pl-4 space-y-3">
+                        <div>
+                          <h5 className="text-[11px] font-bold uppercase tracking-wider text-amber-700 font-mono flex items-center gap-1.5 mb-1.5">
+                            <FileText size={11} />
+                            Evidence Verified
+                          </h5>
+                          <div className="rounded border border-amber-200/60 bg-amber-50/50 p-2.5 relative">
+                            <Quote size={12} className="absolute text-amber-300 top-1 left-1.5" />
+                            <p className="text-xs text-amber-900 italic leading-relaxed pl-4">
+                              {rel.evidenceSnippet}
+                            </p>
+                          </div>
+                          {rel.evidenceSource && (
+                            <div className="text-[10px] font-mono text-ink-400 mt-1.5">
+                              Source: {rel.evidenceSource}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* ── Affected Requirements chips ── */}
+                  {chips.length > 0 && (
+                    <div className="mt-4 pt-3.5 border-t border-ink-100">
+                      <h5 className="text-[10px] font-bold uppercase tracking-wider text-ink-400 font-mono mb-2">
+                        Affects / Relevant Requirements
+                      </h5>
+                      <div className="flex flex-wrap gap-1.5">
+                        {chips.map((chip) => (
+                          <span
+                            key={chip}
+                            className="inline-flex items-center rounded-full bg-ink-100 px-2.5 py-0.5 text-[11px] font-medium text-ink-700 border border-ink-200"
+                          >
+                            {chip}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+
+  // ── GENERIC (real analyses, hindi, tamil) ──────────────────────────────────
   return (
     <div className="space-y-6">
       {/* ── Summary count strip ─────────────────────────────────────── */}
