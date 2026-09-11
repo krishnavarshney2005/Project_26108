@@ -743,7 +743,7 @@ export const analyses: Analysis[] = [
     documentCount: 1,
     standardsIdentified: 5,
     gapsFound: 2,
-    certificationsRequired: 1,
+    certificationsRequired: 3,
     confidence: 91,
     summary:
       'Analysis of RCC bridge specifications identified IS 456 and IS 800 as primary governing codes. Structural steel grade IS 2062 requires mandatory BIS ISI mark certification. Two gaps relate to aggregate grading conformity and concrete grade specification for marine exposure conditions.',
@@ -761,7 +761,7 @@ export const analyses: Analysis[] = [
     documentCount: 1,
     standardsIdentified: 0,
     gapsFound: 0,
-    certificationsRequired: 1,
+    certificationsRequired: 3,
     confidence: 0,
     summary: null,
     matchedStandardIds: [],
@@ -1650,7 +1650,7 @@ export const hindiAnalysis: Analysis = {
   documentCount: 1,
   standardsIdentified: 4,
   gapsFound: 3,
-  certificationsRequired: 1,
+  certificationsRequired: 3,
   confidence: 88,
   summary: 'Bilingual (Hindi/English) tender successfully processed. Extracted 5 core requirements. Mapped to IS 1391 (Part 2) : 2018 (Split ACs) and IS 8148 : 2018 (Packaged / Tower / Cassette ACs). Identified 2 procurement SLAs requiring officer review — service frequency commitment and 5-year experience eligibility.',
   matchedStandardIds: ['std-hindi-1391', 'std-hindi-8148', 'std-732', 'std-msme'],
@@ -1668,7 +1668,7 @@ export const tamilAnalysis: Analysis = {
   documentCount: 1,
   standardsIdentified: 4,
   gapsFound: 1,
-  certificationsRequired: 1,
+  certificationsRequired: 3,
   confidence: 96,
   summary: 'Analysis identified key requirements for the comprehensive AMC of 168 Air Conditioning units (Tamil translated). The tender specifies a 10% Performance Bank Guarantee, MSME EMD exemptions, and mandates a strict Integrity Pact. Minimum turnover requirement of ₹1.21 Lakhs and 5 years experience were also detected.',
   matchedStandardIds: ['std-1391', 'std-8148', 'std-732', 'std-msme'],
@@ -1993,18 +1993,64 @@ export const hindiRegulatoryRequirements: RegulatoryRequirement[] = [
     type: 'certification',
     status: 'applicable',
     relatedStandard: 'IS 1391',
-    issuingAuthority: 'Bureau of Indian Standards',
-    sourceDocument: 'QCO 2019',
-    whyAppliesText: 'Mandatory for public procurement. Without this, the vendor cannot legally supply or replace complete AC units.',
+    issuingAuthority: 'Bureau of Indian Standards / MeitY',
+    sourceDocument: 'Air Conditioner and its related Parts (Quality Control) Order, 2019',
+    orderNumber: 'CG-DL-E-05122019-214519',
+    validityInfo: 'Effective from 01 Jan 2020',
+    whyAppliesText: 'Mandatory statutory requirement under the BIS Act for room air conditioners. Without this, the vendor cannot legally supply or install the equipment in India, regardless of tender clauses.',
     whyAppliesCriteria: [
-        { text: 'Target equipment is Split ACs', matched: true, note: 'Matches IS 1391' },
-        { text: 'Procurement is for government department', matched: true }
+        { text: 'Equipment category matches "Room Air Conditioners"', matched: true, note: 'Matches IS 1391' },
+        { text: 'Procurement involves replacement of complete units or compressors', matched: true }
     ],
     evidenceAvailable: true,
-    evidenceSnippet: 'CRS registration is mandatory for all units',
-    evidenceLocation: 'Page 5',
+    evidenceSnippet: 'All supplied ACs and replacement compressors must be BIS approved / आपूर्ति किए गए सभी एसी और कंप्रेसर बीआईएस अनुमोदित होने चाहिए',
+    evidenceLocation: 'Page 5, Clause 8(b)',
     reviewConfidence: 'high-confidence',
     decision: 'accepted'
+  },
+  {
+    id: 'reg-h2',
+    analysisId: 'an-hindi',
+    requirement: 'BEE Minimum Star Rating (Energy Performance)',
+    type: 'regulatory-order',
+    status: 'applicable',
+    relatedStandard: 'BEE Schedule 1',
+    issuingAuthority: 'Bureau of Energy Efficiency (MoP)',
+    sourceDocument: 'Ministry of Finance Procurement Guidelines for Appliances',
+    orderNumber: 'F.No.26/6/2012-PPD',
+    validityInfo: 'Current & Enforced',
+    whyAppliesText: 'Government of India mandates that all ministries and departments must procure appliances with a minimum 3-Star or higher BEE rating to ensure energy efficiency.',
+    whyAppliesCriteria: [
+        { text: 'Appliance is listed in BEE Mandatory Certification list', matched: true },
+        { text: 'Buyer is a Government/Institutional entity', matched: true, note: 'BRIC-NIBMG' }
+    ],
+    evidenceAvailable: true,
+    evidenceSnippet: 'Energy efficient minimum 3-star rated units / ऊर्जा कुशल न्यूनतम 3-स्टार रेटेड इकाइयां',
+    evidenceLocation: 'Page 2, Scope of Work',
+    reviewConfidence: 'high-confidence',
+    decision: 'accepted'
+  },
+  {
+    id: 'reg-h3',
+    analysisId: 'an-hindi',
+    requirement: 'Class-I Local Supplier Self-Certification',
+    type: 'procurement-condition',
+    status: 'conditional',
+    relatedStandard: 'PPP-MII Order',
+    issuingAuthority: 'DPIIT, Ministry of Commerce',
+    sourceDocument: 'Public Procurement (Preference to Make in India) Order 2017',
+    orderNumber: 'P-45021/2/2017-PP (BE-II)',
+    validityInfo: 'Updated 16 Sep 2020',
+    whyAppliesText: 'To claim purchase preference as a domestic supplier, the bidder must declare that the local content in the offered service/goods exceeds 50%. This is conditional upon the bidder opting for the preference.',
+    whyAppliesCriteria: [
+        { text: 'Estimated tender value exceeds ₹5 Lakhs', matched: true },
+        { text: 'Bidder claims MII preference in submission', matched: false, note: 'Requires manual verification of bid documents' }
+    ],
+    evidenceAvailable: true,
+    evidenceSnippet: 'Preference will be given to Make in India compliant bidders as per Govt norms / मेक इन इंडिया नियमों के अनुसार वरीयता दी जाएगी',
+    evidenceLocation: 'Page 8, Eligibility',
+    reviewConfidence: 'needs-review',
+    decision: 'reviewed'
   }
 ];
 
