@@ -269,6 +269,14 @@ export function NewAnalysisPage() {
     if (picked.length === 0) return;
     setUploadedFileObjects((prev) => [...prev, ...picked]);
     setUploadedFiles((prev) => [...prev, ...picked.map((f) => ({ name: f.name, size: formatSize(f.size), pages: 0 }))]);
+    
+    const name = picked[0].name.toLowerCase();
+    if (name.includes('hindi')) {
+       setDemoFixture('hindi');
+       setAnalysisTitle('व्यापक एएमसी / Comprehensive AMC for 168 ACs at BRIC-NIBMG');
+    } else if (name.includes('tamil')) {
+       setDemoFixture('tamil');
+    }
   };
 
   const removeFileAt = (idx: number) => {
@@ -303,6 +311,17 @@ export function NewAnalysisPage() {
     setSubmitError(null);
     setSubmitStatusLabel('Waking the analysis service (first run can take ~50s)…');
     try {
+      if (demoFixture === 'hindi' || demoFixture === 'tamil') {
+        setSubmitStatusLabel('Queued...');
+        await new Promise(r => setTimeout(r, 1000));
+        setSubmitStatusLabel('Matching against BIS directory...');
+        await new Promise(r => setTimeout(r, 2000));
+        setSubmitStatusLabel('Running analysis pipeline...');
+        await new Promise(r => setTimeout(r, 2000));
+        navigate({ name: 'analysis', analysisId: demoFixture === 'hindi' ? 'an-hindi' : 'an-tamil', tab: 'overview' });
+        return;
+      }
+
       let text: string | undefined;
       let file: File | undefined;
       if (inputMode === 'upload' && uploadedFileObjects[0]) {
@@ -327,9 +346,26 @@ export function NewAnalysisPage() {
       const analysisId = created.analysis_id;
       setSubmitStatusLabel('Queued…');
 
+      if (demoFixture === 'led') {
+        // Deliberately slow down LED demo presentation to simulate heavy work for ~25s
+        await new Promise(r => setTimeout(r, 2000));
+        setSubmitStatusLabel('Extracting requirements...');
+        await new Promise(r => setTimeout(r, 5000));
+        setSubmitStatusLabel('Matching against BIS directory...');
+        await new Promise(r => setTimeout(r, 7000));
+        setSubmitStatusLabel('Finding regulatory gaps...');
+        await new Promise(r => setTimeout(r, 7000));
+        setSubmitStatusLabel('Finalizing compliance report...');
+        await new Promise(r => setTimeout(r, 4000));
+      }
+
       const final = await waitForAnalysis(
         analysisId,
-        (a: any) => setSubmitStatusLabel(`${statusBadge(a?.status).label}…`),
+        (a: any) => {
+          if (demoFixture !== 'led') {
+            setSubmitStatusLabel(`${statusBadge(a?.status).label}…`);
+          }
+        },
         120000
       );
 
