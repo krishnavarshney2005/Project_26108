@@ -81,28 +81,23 @@ def extract_text(path: Path) -> str:
 
 def _extract_pdf(path: Path) -> str:
     try:
-        import pypdfium2 as pdfium
+        import pymupdf
     except ImportError as exc:
         raise DocumentError(
-            "pypdfium2 is not installed.",
+            "PyMuPDF is not installed.",
             code="MISSING_DEPENDENCY",
         ) from exc
 
     try:
-        pdf = pdfium.PdfDocument(str(path))
+        doc = pymupdf.open(str(path))
         pages: list[str] = []
-        for i, page in enumerate(pdf, start=1):
-            textpage = page.get_textpage()
-            text = textpage.get_text_range()
+        for i, page in enumerate(doc, start=1):
+            text = page.get_text()
             if text and text.strip():
                 # Prepend a page marker so downstream can track source locations
                 pages.append(f"--- Page {i} ---\n{text.strip()}")
-            
-            # Free memory for the page
-            [x.close() for x in (textpage, page)]
-            
-        pdf.close()
-
+        doc.close()
+        return "\n".join(pages)
 
     except DocumentError:
         raise
