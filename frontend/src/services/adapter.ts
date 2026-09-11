@@ -14,6 +14,14 @@ import type {
   StandardRelationship,
   StandardStatus,
 } from '@/data/types';
+import {
+  isLedDemoRaw,
+  LED_STANDARDS,
+  LED_SPEC_REQUIREMENTS,
+  LED_REGULATORY,
+  LED_EVIDENCE,
+  LED_RELATIONSHIPS,
+} from '@/data/ledDemoFixture';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -332,6 +340,52 @@ export function adaptAnalysis(raw: any): AdaptedAnalysis {
     gapIds: specRequirements.filter((s) => s.status !== 'covered').map((s) => s.id),
     documentIds: raw?.tender_id ? [String(raw.tender_id)] : [],
   };
+
+  // ── LED Demo Fixture Overlay ──────────────────────────────────────────────
+  // Activated only when the tender title contains the LED sample marker
+  // (set by NewAnalysisPage when "Load LED Street-Lighting Example" is pressed).
+  // All other analyses pass through unchanged.
+  if (isLedDemoRaw(raw)) {
+    const fixedId = analysisId;
+    const fixedAnalysis: Analysis = {
+      ...analysis,
+      documentCount: 1,               // show "1 document" — the bundled PDF
+      standardsIdentified: LED_STANDARDS.length,  // 5
+      gapsFound: 2,                   // 2 review items (req 10 + 11)
+      certificationsRequired: LED_REGULATORY.length, // 2
+      confidence: 82,
+      summary: '5 applicable BIS standards identified. 9 of 11 requirements mapped. 2 items require procurement officer review. BIS CRS (QCO 2020) certification mandatory.',
+      matchedStandardIds: LED_STANDARDS.map((s) => s.id),
+      gapIds: LED_SPEC_REQUIREMENTS.filter((r) => r.status !== 'covered').map((r) => r.id),
+    };
+    const fixedSpecReqs = LED_SPEC_REQUIREMENTS.map((r) => ({ ...r, analysisId: fixedId }));
+    const fixedRegulatory = LED_REGULATORY.map((r) => ({ ...r, analysisId: fixedId }));
+    const fixedEvidence = LED_EVIDENCE.map((e) => ({ ...e, analysisId: fixedId }));
+    const fixedRelationships = LED_RELATIONSHIPS.map((r) => ({ ...r, analysisId: fixedId }));
+    const fixedMatchedReqs: MatchedRequirementItem[] = LED_SPEC_REQUIREMENTS.map((r) => ({
+      id: r.id,
+      requirement: r.requirement,
+      parameterValue: r.tenderEvidence,
+      standardCode: r.applicableStandard,
+      standardId: r.standardId,
+      clause: r.clause,
+      status: r.status === 'covered' ? 'covered' : r.status === 'review' ? 'needs-review' : 'not-found',
+      evidenceSnippet: r.supportingEvidence,
+      reviewConfidence: r.reviewConfidence,
+    }));
+    return {
+      analysis: fixedAnalysis,
+      standards: LED_STANDARDS,
+      primaryStandard: LED_STANDARDS[0],
+      matchedRequirements: fixedMatchedReqs,
+      specRequirements: fixedSpecReqs,
+      regulatory: fixedRegulatory,
+      evidence: fixedEvidence,
+      relationships: fixedRelationships,
+      degradedReason: null,
+      analysisMode: 'led_demo_fixture',
+    };
+  }
 
   return {
     analysis,

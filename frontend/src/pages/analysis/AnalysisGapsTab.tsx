@@ -35,10 +35,12 @@ import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { useRouter } from '@/router';
 import {
+  getAnalysisById,
   getSpecificationRequirementsByAnalysisId,
   getStandardById,
 } from '@/data/mockData';
 import { isSeededAnalysisId } from '@/data/runtimeStore';
+import { LED_IMPROVEMENT_SUGGESTIONS, LED_DEMO_TITLE_MARKER } from '@/data/ledDemoFixture';
 import type {
   HumanDecision,
   HumanReviewConfidence,
@@ -55,6 +57,11 @@ export function AnalysisGapsTab({ analysisId }: Props) {
   const rawRequirements = getSpecificationRequirementsByAnalysisId(analysisId);
   const isReal = !isSeededAnalysisId(analysisId);
 
+  // Detect the built-in LED street-lighting demo so we can show the AI improve panel.
+  const _analysis = isReal ? getAnalysisById(analysisId) : null;
+  const isLedDemo = isReal && (_analysis?.title?.includes(LED_DEMO_TITLE_MARKER) ?? false);
+
+  const [showImprove, setShowImprove] = useState(false);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<SpecificationRequirementStatus | 'all'>('all');
   
@@ -199,6 +206,16 @@ export function AnalysisGapsTab({ analysisId }: Props) {
           </div>
 
           <div className="flex items-center gap-2">
+            {isLedDemo && (
+              <Button
+                variant={showImprove ? 'primary' : 'secondary'}
+                size="sm"
+                leftIcon={<Sparkles size={13} />}
+                onClick={() => setShowImprove((v) => !v)}
+              >
+                AI Improve Specification
+              </Button>
+            )}
             <Button
               variant="secondary"
               size="sm"
@@ -262,6 +279,86 @@ export function AnalysisGapsTab({ analysisId }: Props) {
           </div>
         </div>
       </div>
+
+      {/* ------------------------------------------------------------------ */}
+      {/* AI IMPROVE SPECIFICATION PANEL (LED demo only)                      */}
+      {/* ------------------------------------------------------------------ */}
+      <AnimatePresence>
+        {isLedDemo && showImprove && (
+          <motion.div
+            key="improve-panel"
+            initial={{ opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+            transition={{ duration: 0.18 }}
+            className="rounded-xl border border-teal-200 bg-gradient-to-br from-teal-50/60 to-white shadow-soft"
+          >
+            {/* Panel header */}
+            <div className="flex items-center justify-between px-5 py-4 border-b border-teal-100">
+              <div className="flex items-center gap-2.5">
+                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-teal-700 text-white">
+                  <Sparkles size={16} />
+                </div>
+                <div>
+                  <p className="text-sm font-bold text-teal-950 tracking-tight">AI Specification Improvement Suggestions</p>
+                  <p className="text-[11px] text-teal-700 mt-0.5">
+                    6 targeted improvements to strengthen this LED street-lighting procurement
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowImprove(false)}
+                className="rounded-md p-1.5 text-teal-600 hover:bg-teal-100 transition-colors"
+                aria-label="Close"
+              >
+                <X size={14} />
+              </button>
+            </div>
+
+            {/* Suggestion list */}
+            <div className="divide-y divide-teal-100/60">
+              {LED_IMPROVEMENT_SUGGESTIONS.map((s, i) => (
+                <div key={s.id} className="px-5 py-4">
+                  <div className="flex gap-3">
+                    {/* Index badge */}
+                    <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-teal-700 text-white text-[11px] font-bold font-mono mt-0.5">
+                      {i + 1}
+                    </div>
+                    <div className="flex-1 min-w-0 space-y-2">
+                      {/* Area tag + issue */}
+                      <div className="flex flex-wrap items-start gap-2">
+                        <span className="rounded bg-teal-100 px-2 py-0.5 text-[10px] font-semibold text-teal-900 font-mono uppercase tracking-wide shrink-0">
+                          {s.area}
+                        </span>
+                      </div>
+                      <p className="text-[12px] text-ink-700 leading-relaxed font-medium">
+                        {s.whatToImprove}
+                      </p>
+                      {/* Why it matters */}
+                      <div className="flex gap-1.5 rounded-lg bg-amber-50 border border-amber-100 px-3 py-2">
+                        <AlertTriangle size={12} className="text-amber-600 mt-0.5 shrink-0" />
+                        <p className="text-[11px] text-amber-800 leading-relaxed">{s.whyItMatters}</p>
+                      </div>
+                      {/* Suggested wording */}
+                      <div className="rounded-lg bg-teal-50 border border-teal-100 px-3 py-2.5">
+                        <p className="text-[10px] font-semibold text-teal-700 uppercase tracking-wider font-mono mb-1">Suggested clause wording</p>
+                        <p className="text-[11px] text-teal-900 leading-relaxed italic">"{s.suggestedWording}"</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Footer */}
+            <div className="px-5 py-3 border-t border-teal-100 bg-teal-50/40 rounded-b-xl">
+              <p className="text-[10px] text-teal-600 font-mono">
+                ✦ Suggestions generated deterministically from IS 16107:2023, IS 10322 (Part 5/Sec 3), IS 16106, and IS 1944. No external AI service required.
+              </p>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* ------------------------------------------------------------------ */}
       {/* 2. POTENTIAL PROCUREMENT RESTRICTIVENESS ALERT                     */}
