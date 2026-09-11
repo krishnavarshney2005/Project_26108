@@ -761,7 +761,7 @@ export const analyses: Analysis[] = [
     documentCount: 1,
     standardsIdentified: 0,
     gapsFound: 0,
-    certificationsRequired: 0,
+    certificationsRequired: 1,
     confidence: 0,
     summary: null,
     matchedStandardIds: [],
@@ -1426,6 +1426,7 @@ export function getGapsByAnalysisId(analysisId: string): Gap[] {
 }
 
 export function getRelationshipsByAnalysisId(analysisId: string): StandardRelationship[] {
+  if (analysisId === 'an-hindi') return hindiRelationships;
   return getRealRelationships(analysisId) || relationships.filter((r) => r.analysisId === analysisId);
 }
 
@@ -1449,6 +1450,7 @@ export function getMatchedRequirementsByAnalysisId(analysisId: string): MatchedR
 export function getEvidenceChainsByAnalysisId(analysisId: string): EvidenceChainItem[] {
   const real = getRealEvidence(analysisId);
   if (real) return real;
+  if (analysisId === 'an-hindi') return hindiEvidenceChains;
   if (analysisId === 'an-001') {
     return evidenceChains;
   }
@@ -1626,7 +1628,8 @@ export function getSpecificationRequirementsByAnalysisId(analysisId: string): Sp
 export function getRegulatoryRequirementsByAnalysisId(analysisId: string): RegulatoryRequirement[] {
   const real = getRealRegulatory(analysisId);
   if (real) return real;
-  if (analysisId === 'an-hindi' || analysisId === 'an-tamil') return []; // Just empty for now to save space, or could mock
+  if (analysisId === 'an-hindi') return hindiRegulatoryRequirements;
+  if (analysisId === 'an-tamil') return []; // Just empty for now to save space, or could mock
   if (analysisId === 'an-001') {
     return regulatoryRequirements;
   }
@@ -1639,18 +1642,18 @@ export function getRegulatoryRequirementsByAnalysisId(analysisId: string): Regul
 
 export const hindiAnalysis: Analysis = {
   id: 'an-hindi',
-  title: 'व्यापक एएमसी / Comprehensive AMC for 168 ACs at BRIC-NIBMG',
+  title: 'hindi:english tender.pdf',
   category: 'HVAC Maintenance',
   status: 'completed',
   createdAt: '2026-09-11T10:00:00Z',
   completedAt: '2026-09-11T10:01:15Z',
   documentCount: 1,
-  standardsIdentified: 2,
+  standardsIdentified: 4,
   gapsFound: 3,
-  certificationsRequired: 0,
+  certificationsRequired: 1,
   confidence: 88,
   summary: 'Bilingual (Hindi/English) tender successfully processed. Extracted 5 core requirements. Mapped to IS 1391 (Part 2) : 2018 (Split ACs) and IS 8148 : 2018 (Packaged / Tower / Cassette ACs). Identified 2 procurement SLAs requiring officer review — service frequency commitment and 5-year experience eligibility.',
-  matchedStandardIds: ['std-hindi-1391', 'std-hindi-8148'],
+  matchedStandardIds: ['std-hindi-1391', 'std-hindi-8148', 'std-732', 'std-msme'],
   gapIds: ['req-hi-4', 'req-hi-5'],
   documentIds: ['doc-hindi-1'],
 };
@@ -1823,15 +1826,15 @@ standards.push(...extraStandards);
 
 
 export const hindiMatchedRequirements: MatchedRequirementItem[] = [
-  { id: 'mr-h1', requirement: '10% Performance Bank Guarantee', parameterValue: '10% of contract', standardCode: 'IS 1391', standardId: 'std-1391', clause: 'Section 4.1', status: 'covered', reviewConfidence: 'high-confidence', decision: 'accepted' },
-  { id: 'mr-h2', requirement: 'Turnover Requirement ₹1.21 Lakh', parameterValue: '1.21 Lakhs', standardCode: 'IS 8148', standardId: 'std-8148', clause: 'Section 3.2', status: 'covered', reviewConfidence: 'high-confidence', decision: 'accepted' },
+  { id: 'mr-h1', requirement: '10% Performance Bank Guarantee', parameterValue: '10% of contract', standardCode: 'IS 1391', standardId: 'std-hindi-1391', clause: 'Section 4.1', status: 'covered', reviewConfidence: 'high-confidence', decision: 'accepted' },
+  { id: 'mr-h2', requirement: 'Turnover Requirement ₹1.21 Lakh', parameterValue: '1.21 Lakhs', standardCode: 'IS 8148', standardId: 'std-hindi-8148', clause: 'Section 3.2', status: 'covered', reviewConfidence: 'high-confidence', decision: 'accepted' },
   { id: 'mr-h3', requirement: 'Electrical Safety AMC', parameterValue: 'Safe Wiring', standardCode: 'IS 732', standardId: 'std-732', clause: 'Section 5', status: 'needs-review', reviewConfidence: 'needs-review', decision: 'reviewed' },
   { id: 'mr-h4', requirement: 'EMD Exemption', parameterValue: 'MSME', standardCode: 'GFR Rule 170', standardId: 'std-msme', clause: 'Rule 170 (i)', status: 'covered', reviewConfidence: 'high-confidence', decision: 'accepted' },
 ];
 
 export const tamilMatchedRequirements: MatchedRequirementItem[] = [
-  { id: 'mr-t1', requirement: '10% செயல்திறன் வங்கி உத்தரவாதம்', parameterValue: '10% of contract', standardCode: 'IS 1391', standardId: 'std-1391', clause: 'Section 4.1', status: 'covered', reviewConfidence: 'high-confidence', decision: 'accepted' },
-  { id: 'mr-t2', requirement: 'Turnover Requirement ₹1.21 Lakh', parameterValue: '1.21 Lakhs', standardCode: 'IS 8148', standardId: 'std-8148', clause: 'Section 3.2', status: 'covered', reviewConfidence: 'high-confidence', decision: 'accepted' },
+  { id: 'mr-t1', requirement: '10% செயல்திறன் வங்கி உத்தரவாதம்', parameterValue: '10% of contract', standardCode: 'IS 1391', standardId: 'std-hindi-1391', clause: 'Section 4.1', status: 'covered', reviewConfidence: 'high-confidence', decision: 'accepted' },
+  { id: 'mr-t2', requirement: 'Turnover Requirement ₹1.21 Lakh', parameterValue: '1.21 Lakhs', standardCode: 'IS 8148', standardId: 'std-hindi-8148', clause: 'Section 3.2', status: 'covered', reviewConfidence: 'high-confidence', decision: 'accepted' },
   { id: 'mr-t3', requirement: 'Electrical Safety AMC', parameterValue: 'Safe Wiring', standardCode: 'IS 732', standardId: 'std-732', clause: 'Section 5', status: 'needs-review', reviewConfidence: 'needs-review', decision: 'reviewed' },
   { id: 'mr-t4', requirement: 'EMD Exemption', parameterValue: 'MSME', standardCode: 'GFR Rule 170', standardId: 'std-msme', clause: 'Rule 170 (i)', status: 'covered', reviewConfidence: 'high-confidence', decision: 'accepted' },
 ];
@@ -1952,5 +1955,75 @@ export const tamilSpecRequirements: SpecificationRequirement[] = [
     aiConfidence: 98,
     evidenceSnippet: '"Performance Bank Guarantee amounting to 10% (Ten percent) of the Contract value is to be submitted"',
     evidenceLocation: 'பக்கம் 24',
+  }
+];
+
+
+export const hindiRelationships: StandardRelationship[] = [
+  {
+    id: 'rel-h1',
+    analysisId: 'an-hindi',
+    fromStandardId: 'std-hindi-1391',
+    toStandardId: 'std-hindi-1391-part1',
+    type: 'normative',
+    role: 'primary',
+    label: 'Normative Reference',
+    description: 'IS 1391 Part 2 (Split ACs) relies on IS 1391 Part 1 for general unitary air conditioner definitions and baseline performance requirements.',
+    whyMatters: 'Ensures foundational performance testing matches industry norms.',
+  },
+  {
+    id: 'rel-h2',
+    analysisId: 'an-hindi',
+    fromStandardId: 'std-hindi-1391',
+    toStandardId: 'std-hindi-5111',
+    type: 'testing',
+    role: 'normative',
+    label: 'Testing Methodology',
+    description: 'Air flow measurements for the AC units must be conducted according to the methodology specified in IS 5111.',
+    whyMatters: 'Verifies the capacity and cooling efficiency claims of the replaced parts.',
+  }
+];
+
+
+export const hindiRegulatoryRequirements: RegulatoryRequirement[] = [
+  {
+    id: 'reg-h1',
+    analysisId: 'an-hindi',
+    requirement: 'BIS CRS Registration (Compulsory Registration Scheme)',
+    type: 'certification',
+    status: 'mandatory',
+    relatedStandard: 'IS 1391',
+    issuingAuthority: 'Bureau of Indian Standards',
+    sourceDocument: 'QCO 2019',
+    description: 'All split air conditioners must have a valid CRS registration and display the Standard Mark.',
+    whyMatters: 'Mandatory for public procurement. Without this, the vendor cannot legally supply or replace complete AC units.',
+    actionRequired: 'Ensure the AMC contractor uses only BIS-registered spare parts and replacement units.',
+    complianceStatus: 'pending'
+  }
+];
+
+
+export const hindiEvidenceChains: EvidenceChainItem[] = [
+  {
+    id: 'ev-h1',
+    analysisId: 'an-hindi',
+    requirement: '10% Performance Bank Guarantee',
+    standard: 'General Procurement Guidelines',
+    clause: 'Sec 2',
+    evidence: 'Performance Bank Guarantee amounting to 10% (Ten percent) of the Contract value is to be submitted',
+    sourceDoc: 'hindi:english tender.pdf',
+    sourceLocation: 'Page 2',
+    status: 'matched'
+  },
+  {
+    id: 'ev-h2',
+    analysisId: 'an-hindi',
+    requirement: 'Experience Criterion',
+    standard: 'Administrative',
+    clause: 'Eligibility Criteria',
+    evidence: 'न्यूनतम 5 (पांच) वर्ष का अनुभव / Minimum 5 (five) years experience',
+    sourceDoc: 'hindi:english tender.pdf',
+    sourceLocation: 'Page 3',
+    status: 'matched'
   }
 ];
