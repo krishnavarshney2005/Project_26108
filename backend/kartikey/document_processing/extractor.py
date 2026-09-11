@@ -81,23 +81,21 @@ def extract_text(path: Path) -> str:
 
 def _extract_pdf(path: Path) -> str:
     try:
-        import pymupdf
+        import pdfplumber
     except ImportError as exc:
         raise DocumentError(
-            "PyMuPDF is not installed.",
+            "pdfplumber is not installed. Run: pip install pdfplumber",
             code="MISSING_DEPENDENCY",
         ) from exc
 
     try:
-        doc = pymupdf.open(str(path))
-        pages: list[str] = []
-        for i, page in enumerate(doc, start=1):
-            text = page.get_text()
-            if text and text.strip():
-                # Prepend a page marker so downstream can track source locations
-                pages.append(f"--- Page {i} ---\n{text.strip()}")
-        doc.close()
-        return "\n".join(pages)
+        with pdfplumber.open(str(path)) as pdf:
+            pages: list[str] = []
+            for i, page in enumerate(pdf.pages, start=1):
+                text = page.extract_text(x_tolerance=3, y_tolerance=3)
+                if text and text.strip():
+                    # Prepend a page marker so downstream can track source locations
+                    pages.append(f"--- Page {i} ---\n{text.strip()}")
 
     except DocumentError:
         raise
