@@ -311,6 +311,151 @@ export function AnalysisRelationshipsTab({ analysis, analysisId, isReal = false 
     }
   };
 
+  // ─── LED DEMO ONLY ───────────────────────────────────────────────────────────
+  // Rich relationship card view for the an-001 LED demo fixture.
+  // This early-return is reached only when analysisId === 'an-001' (a seeded
+  // analysis, so isReal is always false here). Real backend uploads never match
+  // 'an-001' and are unaffected. Other seeded demos (an-002/003, an-hindi, etc.)
+  // also pass through to their normal paths below.
+  if (!isReal && (analysis?.id === 'an-001' || sourceAnalysisId === 'an-001')) {
+    const countByRole = (role: string) => rels.filter((r) => r.role === role).length;
+
+    const roleSummary: Array<{ role: string; label: string; count: number }> = [
+      { role: 'normative',    label: 'Normative Reference',         count: countByRole('normative') },
+      { role: 'testing',      label: 'Testing Protocol',            count: countByRole('testing') },
+      { role: 'safety',       label: 'Safety Standard',             count: countByRole('safety') },
+      { role: 'installation', label: 'Design & Installation',       count: countByRole('installation') },
+      { role: 'equivalent',   label: 'International Equivalent',    count: countByRole('equivalent') },
+      { role: 'supersedes',   label: 'Superseded / Withdrawn',      count: countByRole('supersedes') },
+    ].filter((s) => s.count > 0);
+
+    return (
+      <div className="space-y-6">
+        {/* ── Summary count strip ─────────────────────────────────────── */}
+        <div className="flex flex-wrap items-center gap-2 pb-3 border-b border-ink-100">
+          <span className="text-xs font-bold text-ink-700 mr-1 font-mono uppercase tracking-wider">
+            Relationship Summary:
+          </span>
+          {roleSummary.map(({ role, label, count }) => {
+            const theme = getRoleTheme(role);
+            return (
+              <span
+                key={role}
+                className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-[11px] font-semibold font-mono ${theme.badgeBg} ${theme.badgeText} border-current/30`}
+              >
+                <span className={`h-1.5 w-1.5 rounded-full ${theme.dot}`} />
+                {count} {label}
+              </span>
+            );
+          })}
+        </div>
+
+        {/* ── Relationship cards ──────────────────────────────────────── */}
+        <div className="grid grid-cols-1 gap-5">
+          {rels.map((rel) => {
+            const theme = getRoleTheme(rel.role || 'normative');
+            const fromStd = localGetStandardById(rel.fromStandardId);
+            const toStd   = localGetStandardById(rel.toStandardId);
+            const fromLabel = fromStd?.number ?? rel.fromStandardId;
+            const toLabel   = toStd?.number   ?? rel.toStandardId;
+
+            return (
+              <div
+                key={rel.id}
+                className="rounded-xl border border-ink-200 bg-white shadow-soft hover:shadow-md transition-shadow overflow-hidden"
+              >
+                {/* Coloured top bar matching role */}
+                <div className="h-1" style={{ backgroundColor: theme.stroke }} />
+
+                <div className="p-5">
+                  {/* Card header: type badge + clause + title */}
+                  <div className="flex flex-wrap items-start gap-3 pb-4 mb-4 border-b border-ink-100">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex flex-wrap items-center gap-2 mb-1.5">
+                        <span
+                          className={`inline-block rounded px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest font-mono ${theme.badgeBg} ${theme.badgeText}`}
+                        >
+                          {theme.label}
+                        </span>
+                        {rel.clause && (
+                          <span className="text-[11px] font-mono text-ink-400">{rel.clause}</span>
+                        )}
+                      </div>
+
+                      {/* Source → Target */}
+                      <div className="flex items-center gap-2 mt-1">
+                        <button
+                          onClick={() => fromStd && navigate({ name: 'standard', standardId: fromStd.id })}
+                          className={`font-mono font-bold text-sm ${fromStd ? 'text-ink-900 hover:text-teal-700 underline underline-offset-2' : 'text-ink-600 cursor-default'}`}
+                        >
+                          {fromLabel}
+                        </button>
+                        <ArrowRight size={14} className="text-ink-400 shrink-0" />
+                        <button
+                          onClick={() => toStd && navigate({ name: 'standard', standardId: toStd.id })}
+                          className={`font-mono font-bold text-sm ${toStd ? 'text-ink-900 hover:text-teal-700 underline underline-offset-2' : 'text-ink-600 cursor-default'}`}
+                        >
+                          {toLabel}
+                        </button>
+                      </div>
+
+                      <h4 className="mt-1 text-base font-semibold text-ink-800">
+                        {rel.label ?? `${fromLabel} → ${toLabel}`}
+                      </h4>
+                    </div>
+                  </div>
+
+                  {/* Two-column body */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                    {/* Nature of relationship */}
+                    <div>
+                      <h5 className="text-[11px] font-bold uppercase tracking-wider text-ink-400 font-mono mb-2">
+                        Why they're related
+                      </h5>
+                      <p className="text-sm text-ink-700 leading-relaxed">{rel.description}</p>
+                    </div>
+
+                    {/* Procurement impact */}
+                    {rel.whyMatters && (
+                      <div>
+                        <h5 className="text-[11px] font-bold uppercase tracking-wider text-teal-600 font-mono mb-2">
+                          Procurement impact
+                        </h5>
+                        <p className="text-sm text-teal-900 leading-relaxed bg-teal-50/60 border border-teal-100 rounded-lg p-3">
+                          {rel.whyMatters}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Evidence footer */}
+                  {(rel.evidenceSnippet || rel.evidenceSource) && (
+                    <div className="mt-5 rounded-lg bg-ink-50 border border-ink-100 p-3">
+                      {rel.evidenceSource && (
+                        <div className="flex items-center gap-2 mb-1">
+                          <FileText size={11} className="text-ink-400 shrink-0" />
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-ink-400 font-mono">
+                            Evidence:
+                          </span>
+                          <span className="text-[11px] font-semibold text-ink-600">{rel.evidenceSource}</span>
+                        </div>
+                      )}
+                      {rel.evidenceSnippet && (
+                        <p className="text-xs text-ink-500 font-mono italic leading-relaxed">
+                          {rel.evidenceSnippet}
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+
   // Real analyses: the hardcoded LED force-graph (with non-null getStandardById
   // assertions) can't render — show a clean references list from the adapter data.
   if (isReal) {
