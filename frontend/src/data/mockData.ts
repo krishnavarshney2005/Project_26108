@@ -1991,14 +1991,20 @@ export const hindiRegulatoryRequirements: RegulatoryRequirement[] = [
     analysisId: 'an-hindi',
     requirement: 'BIS CRS Registration (Compulsory Registration Scheme)',
     type: 'certification',
-    status: 'mandatory',
+    status: 'applicable',
     relatedStandard: 'IS 1391',
     issuingAuthority: 'Bureau of Indian Standards',
     sourceDocument: 'QCO 2019',
-    description: 'All split air conditioners must have a valid CRS registration and display the Standard Mark.',
-    whyMatters: 'Mandatory for public procurement. Without this, the vendor cannot legally supply or replace complete AC units.',
-    actionRequired: 'Ensure the AMC contractor uses only BIS-registered spare parts and replacement units.',
-    complianceStatus: 'pending'
+    whyAppliesText: 'Mandatory for public procurement. Without this, the vendor cannot legally supply or replace complete AC units.',
+    whyAppliesCriteria: [
+        { text: 'Target equipment is Split ACs', matched: true, note: 'Matches IS 1391' },
+        { text: 'Procurement is for government department', matched: true }
+    ],
+    evidenceAvailable: true,
+    evidenceSnippet: 'CRS registration is mandatory for all units',
+    evidenceLocation: 'Page 5',
+    reviewConfidence: 'high-confidence',
+    decision: 'accepted'
   }
 ];
 
