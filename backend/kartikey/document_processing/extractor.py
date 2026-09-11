@@ -81,21 +81,28 @@ def extract_text(path: Path) -> str:
 
 def _extract_pdf(path: Path) -> str:
     try:
-        import pdfplumber
+        import pypdfium2 as pdfium
     except ImportError as exc:
         raise DocumentError(
-            "pdfplumber is not installed. Run: pip install pdfplumber",
+            "pypdfium2 is not installed.",
             code="MISSING_DEPENDENCY",
         ) from exc
 
     try:
-        with pdfplumber.open(str(path)) as pdf:
-            pages: list[str] = []
-            for i, page in enumerate(pdf.pages, start=1):
-                text = page.extract_text(x_tolerance=3, y_tolerance=3)
-                if text and text.strip():
-                    # Prepend a page marker so downstream can track source locations
-                    pages.append(f"--- Page {i} ---\n{text.strip()}")
+        pdf = pdfium.PdfDocument(str(path))
+        pages: list[str] = []
+        for i, page in enumerate(pdf, start=1):
+            textpage = page.get_textpage()
+            text = textpage.get_text_range()
+            if text and text.strip():
+                # Prepend a page marker so downstream can track source locations
+                pages.append(f"--- Page {i} ---\n{text.strip()}")
+            
+            # Free memory for the page
+            [x.close() for x in (textpage, page)]
+            
+        pdf.close()
+
 
     except DocumentError:
         raise
